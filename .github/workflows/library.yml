@@ -1,0 +1,49 @@
+name: Android CI
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: set up JDK 11
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+      
+    - name: Test
+      run: ls -la
+      
+    - name: Set library version
+      working-directory: ${{ github.workspace }}/library/networking
+      run: |
+        if [ -n "${{ github.event.release.tag_name }}" ]; then
+          version=$(echo ${{ github.event.release.tag_name }} | sed 's/^v//')
+          sed -i "s/version '.*'/version '$version'/g" build.gradle
+          grep -o "version '$version'" build.gradle
+        else
+          echo "No release tag found. Skipping library version update."
+        fi
+
+    - name: Build library
+      working-directory: ${{ github.workspace }}/library/networking
+      run: ../../gradlew assembleRelease
+
+    - name: Publish to Reposilite
+      if: github.event.release && github.event.release.tag_name
+      working-directory: ${{ github.workspace }}/library/networking
+      env:
+        reposiliteUsername: ${{ secrets.reposiliteUsername }}
+        reposilitePassword: ${{ secrets.reposilitePassword }}
+      run: |
+        ../../gradlew publish

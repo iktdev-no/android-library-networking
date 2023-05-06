@@ -1,0 +1,28 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+plugins {
+    id 'com.android.application' version '7.4.1' apply false
+    id 'com.android.library' version '7.4.1' apply false
+    id 'org.jetbrains.kotlin.android' version '1.7.20' apply false
+}
+
+ext {
+    androidSdkVersion = 33
+    androidMinSdk = 21
+
+    javaVersion = JavaVersion.VERSION_11
+    kotlinJvmTarget = '11'
+
+    coreLibraries = [
+            kotlin : 'androidx.core:core-ktx:1.9.0'
+    ]
+
+    layoutLibraries = [
+            androidx : 'androidx.appcompat:appcompat:1.6.1',
+            material : 'com.google.android.material:material:1.8.0',
+            constraint : 'androidx.constraintlayout:constraintlayout:2.1.4'
+    ]
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}
