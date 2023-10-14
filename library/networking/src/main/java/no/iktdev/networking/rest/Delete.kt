@@ -39,6 +39,10 @@ abstract class Delete(url: String?, definedAuthMode: Security.HttpAuthenticate =
         }
     }
 
+    protected inline fun <reified T> request(vararg parts: String, payload: Any, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpObjectResponse<T?> {
+        return request<T>(paths = parts.toList(), payload = payload, securityAuthMode = securityAuthMode)
+    }
+
 
     /**
      * Will return response as raw String

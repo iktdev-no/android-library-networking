@@ -33,6 +33,9 @@ abstract class Get(url: String?, definedAuthMode: Security.HttpAuthenticate = Se
             Http.HttpObjectResponse(0, null, urlBuilder.toUrl())
         }
     }
+    protected inline fun <reified T> request(vararg parts: String, timeOut: Int = 0, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpObjectResponse<T?> {
+        return request(paths = parts.toList(), timeOut = timeOut, securityAuthMode = securityAuthMode)
+    }
 
 
     /**
@@ -40,7 +43,7 @@ abstract class Get(url: String?, definedAuthMode: Security.HttpAuthenticate = Se
      * @param securityAuthMode Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
      */
     @Suppress("unused")
-    protected fun request(paths: List<String> = listOf(), timeOut: Int = 0, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpStringResponse? {
+    protected fun requestResponse(paths: List<String> = listOf(), timeOut: Int = 0, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpStringResponse {
         return executeRequest(method = Method.GET, paths = paths, timeout = timeOut, securityAuthMode = securityAuthMode)
     }
 }
