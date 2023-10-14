@@ -1,7 +1,6 @@
 package no.iktdev.networking
 
 import no.iktdev.networking.client.Http
-import java.net.URI
 import java.net.URL
 
 class UrlBuilder(val url: String) {
@@ -13,7 +12,7 @@ class UrlBuilder(val url: String) {
         private set
     var port: Int = 80
         private set
-    var path: java.util.ArrayList<String> = arrayListOf()
+    var path: List<String> = listOf()
         private set
 
     init {
@@ -26,11 +25,11 @@ class UrlBuilder(val url: String) {
         return if (url.contains("//")) {
             when {
                 Http.isHttps(url) -> {
-                    this.protocol = Protocol.HTTPS;
+                    this.protocol = Protocol.HTTPS
                     true
                 }
                 Http.isHttp(url) -> {
-                    this.protocol = Protocol.HTTP;
+                    this.protocol = Protocol.HTTP
                     true
                 }
                 else -> false
@@ -43,17 +42,19 @@ class UrlBuilder(val url: String) {
         this.domain = murl.trim()
     }
     private fun obtainPaths(url: String) {
-        var murl = if (Http.isHttp(url) && url.contains("//")) url.substring(url.indexOf("//")+2) else url
+        val murl = if (Http.isHttp(url) && url.contains("//")) url.substring(url.indexOf("//")+2) else url
         val urlPath = if (murl.contains("/")) murl.substring(murl.indexOf("/")) else return
         val splittedPaths: java.util.ArrayList<String> = arrayListOf()
         splittedPaths.addAll(urlPath.split("/").filter { it.isNotEmpty() }.toTypedArray())
-        this.path.addAll(splittedPaths)
+        this.path += splittedPaths
     }
 
+    @Suppress("unused")
     fun port(port: Int = 80) = apply { this.port = port }
-    fun to(path: String) = apply { if (path.isNotEmpty()) this.path.add(path) }
-    fun with(paths: ArrayList<String>) = apply {
-        this.path.addAll(paths.filter { it.isNotEmpty() })
+    @Suppress("unused")
+    fun to(path: String) = apply { if (path.isNotEmpty()) this.path += (path) }
+    fun with(paths: List<String>) = apply {
+        this.path += (paths.filter { it.isNotEmpty() })
     }
 
     fun toUrl(): String {

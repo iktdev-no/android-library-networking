@@ -8,6 +8,7 @@ import java.io.FileNotFoundException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 
+@Suppress("unused")
 abstract class Post(url: String?, definedAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.DoAuth): Api(url, definedAuthMode) {
 
 
@@ -15,9 +16,10 @@ abstract class Post(url: String?, definedAuthMode: Security.HttpAuthenticate = S
      * Will return response in T
      * @param paths { url path after baseurl }
      * @param payload Any object that can be converted to json using GSON
-     * @param useAuthorizationBearerOnHttps Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
+     * @param securityAuthMode Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
      */
-    protected inline fun <reified T> request(paths: ArrayList<String> = arrayListOf(), payload: Any, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpObjectResponse<T?> {
+    @Suppress("unused")
+    protected inline fun <reified T> request(paths: List<String> = listOf(), payload: Any, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpObjectResponse<T?> {
         if (url == null) {
             return Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, "No Url passed!")
         }
@@ -43,9 +45,10 @@ abstract class Post(url: String?, definedAuthMode: Security.HttpAuthenticate = S
      * Will return response as raw String
      * @param paths { url path after baseurl }
      * @param payload Any object that can be converted to json using GSON
-     * @param useAuthorizationBearerOnHttps Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
+     * @param securityAuthMode Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
      */
-    protected fun request(paths: ArrayList<String> = arrayListOf(), payload: Any, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpStringResponse {
+    @Suppress("unused")
+    protected fun request(paths: List<String> = listOf(), payload: Any, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpStringResponse {
         val payloadString = Gson().toJson(payload)
         return executeRequest(method = Method.POST, paths = paths, securityAuthMode = securityAuthMode, payload = payloadString)
     }

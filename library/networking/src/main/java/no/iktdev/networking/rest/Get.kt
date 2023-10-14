@@ -6,13 +6,15 @@ import no.iktdev.networking.client.Http
 import java.io.FileNotFoundException
 import java.net.*
 
+@Suppress("unused")
 abstract class Get(url: String?, definedAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.DoAuth): Api(url, definedAuthMode) {
 
     /**
      * @param paths { url paths }
-     * @param useAuthorizationBearerOnHttps Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
+     * @param securityAuthMode Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
      */
-    protected inline fun <reified T> request(paths: ArrayList<String> = arrayListOf(), timeOut: Int = 0, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpObjectResponse<T?> {
+    @Suppress("unused")
+    protected inline fun <reified T> request(paths: List<String> = listOf(), timeOut: Int = 0, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpObjectResponse<T?> {
         if (url == null) {
             return Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, "No Url passed!")
         }
@@ -35,9 +37,10 @@ abstract class Get(url: String?, definedAuthMode: Security.HttpAuthenticate = Se
 
     /**
      * @param paths { url path after baseurl }
-     * @param useAuthorizationBearerOnHttps Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
+     * @param securityAuthMode Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
      */
-    protected fun request(paths: ArrayList<String> = arrayListOf(), timeOut: Int = 0, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpStringResponse? {
+    @Suppress("unused")
+    protected fun request(paths: List<String> = listOf(), timeOut: Int = 0, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpStringResponse? {
         return executeRequest(method = Method.GET, paths = paths, timeout = timeOut, securityAuthMode = securityAuthMode)
     }
 }

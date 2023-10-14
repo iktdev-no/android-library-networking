@@ -18,7 +18,7 @@ open class Api(
     var definedAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.DoAuth
 ) {
     open var timeOut: Int = 5000
-    open val apiPaths: ArrayList<String> = arrayListOf()
+    open val apiPaths: List<String> = listOf()
 
     enum class Method {
         GET,
@@ -26,7 +26,7 @@ open class Api(
         DELETE
     }
 
-
+    @Suppress("unused")
     protected inline fun <reified T> fromJson(content: String, type: Type): T {
         try {
             return Gson().fromJson(content, type)
@@ -44,7 +44,7 @@ open class Api(
     }
 
     protected fun httpClient(
-        paths: ArrayList<String> = arrayListOf(),
+        paths: List<String> = listOf(),
         securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults
     ): Http? {
         if (url == null) {
@@ -57,9 +57,9 @@ open class Api(
         )
     }
 
-    protected final fun executeRequest(
+    protected fun executeRequest(
         method: Method,
-        paths: ArrayList<String>,
+        paths: List<String>,
         timeout: Int = 0,
         securityAuthMode: Security.HttpAuthenticate,
         payload: String? = null
