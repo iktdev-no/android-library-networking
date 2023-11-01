@@ -57,6 +57,10 @@ class UrlBuilder(val url: String) {
         this.path += (paths.filter { it.isNotEmpty() })
     }
 
+    fun with(vararg parts: String) = apply {
+        this.path += parts.filter { it.isNotEmpty() }.toList()
+    }
+
     fun toUrl(): String {
         _url = (if (protocol == Protocol.HTTPS) "https" else "http") + "://" + domain
         if (port != 80)
