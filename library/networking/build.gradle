@@ -44,6 +44,8 @@ dependencies {
     implementation "com.github.bumptech.glide:annotations:$glide_version"
     kapt "com.github.bumptech.glide:compiler:$glide_version"
     implementation "com.github.bumptech.glide:okhttp3-integration:$glide_version"
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.1")
+
 
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.3'

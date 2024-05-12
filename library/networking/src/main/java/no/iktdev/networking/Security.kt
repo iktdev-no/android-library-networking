@@ -18,6 +18,11 @@ class Security {
             val shouldProvide = !(defined == HttpAuthenticate.DoAnon && requestedAuthMode == HttpAuthenticate.Defaults || requestedAuthMode == HttpAuthenticate.DoAnon)
             return !(shouldProvide && authorizationBearerToken.isNullOrEmpty())
         }
+
+        fun useAuthorizationBearer(http: HttpsURLConnection, bearer: String) {
+            http.setRequestProperty("Authorization", "Bearer $bearer")
+            http.instanceFollowRedirects = allowRedirects
+        }
     }
 
     var truster = arrayOf<TrustManager>(
@@ -61,7 +66,6 @@ class Security {
         http.setRequestProperty("Authorization", "Bearer $authorizationBearerToken")
         http.instanceFollowRedirects = allowRedirects
     }
-
 
     class AuthorizationBearerNotConfigured(override val message: String?): RuntimeException()
 

@@ -43,6 +43,13 @@ open class Api(
         return http
     }
 
+    protected fun getHttp(url: URL, useAuthorizationToken: String): Http {
+        val http = if (Http.isHttps(url.toString())) HttpSecure(url) else HttpOpen(url)
+        if (http is HttpSecure && useAuthorizationToken.isNotEmpty())
+            Security.useAuthorizationBearer(http.http, useAuthorizationToken)
+        return http
+    }
+
     protected fun httpClient(
         paths: List<String> = listOf(),
         securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults
@@ -54,6 +61,20 @@ open class Api(
         return getHttp(
             urlBuilder.asURL(),
             Security.shouldProvideBearer(definedAuthMode, securityAuthMode)
+        )
+    }
+
+    protected fun httpClient(
+        paths: List<String> = listOf(),
+        useAuthorizationToken: String
+    ): Http? {
+        if (url == null) {
+            return null
+        }
+        val urlBuilder = UrlBuilder(url).with(apiPaths).with(paths)
+        return getHttp(
+            urlBuilder.asURL(),
+            useAuthorizationToken
         )
     }
 

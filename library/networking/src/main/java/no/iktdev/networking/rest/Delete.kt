@@ -43,6 +43,37 @@ abstract class Delete(url: String?, definedAuthMode: Security.HttpAuthenticate =
         return request<T>(paths = parts.toList(), payload = payload, securityAuthMode = securityAuthMode)
     }
 
+    /**
+     * Will return response in T
+     * @param paths { url path after baseurl }
+     * @param payload Any object that can be converted to json using GSON
+     * @param securityAuthMode Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
+     */
+    @Suppress("unused")
+    protected inline fun <reified T> request(paths: List<String> = listOf(), payload: Any, useAuthorizationBearer: String): Http.HttpObjectResponse<T?> {
+        if (url == null) {
+            return Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, "No Url passed!")
+        }
+        val urlBuilder = UrlBuilder(url).with(apiPaths).with(paths)
+        val http = getHttp(urlBuilder.asURL(), useAuthorizationBearer)
+
+        val payloadString = Gson().toJson(payload)
+
+        return try {
+            http.Delete<T>(payloadString, timeOut)
+        } catch (e: SocketTimeoutException) {
+            Http.HttpObjectResponse(HttpURLConnection.HTTP_CLIENT_TIMEOUT, null, urlBuilder.toUrl())
+        } catch(e: FileNotFoundException) {
+            Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, urlBuilder.toUrl())
+        } catch(e: Exception) {
+            e.printStackTrace()
+            Http.HttpObjectResponse(0, null, urlBuilder.toUrl())
+        }
+    }
+
+    protected inline fun <reified T> request(vararg parts: String, payload: Any, useAuthorizationBearer: String): Http.HttpObjectResponse<T?> {
+        return request<T>(paths = parts.toList(), payload = payload, useAuthorizationBearer)
+    }
 
     /**
      * Will return response as raw String

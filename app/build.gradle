@@ -43,6 +43,7 @@ dependencies {
     implementation layoutLibraries.androidx
     implementation layoutLibraries.material
     implementation layoutLibraries.constraint
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.1")
 
 
     testImplementation 'junit:junit:4.13.2'
