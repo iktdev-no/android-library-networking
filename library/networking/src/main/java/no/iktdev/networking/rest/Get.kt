@@ -75,4 +75,13 @@ abstract class Get(url: String?, definedAuthMode: Security.HttpAuthenticate = Se
     protected fun requestResponse(paths: List<String> = listOf(), timeOut: Int = 0, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpStringResponse {
         return executeRequest(method = Method.GET, paths = paths, timeout = timeOut, securityAuthMode = securityAuthMode)
     }
+
+    /**
+     * @param paths { url path after baseurl }
+     * @param securityAuthMode Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
+     */
+    @Suppress("unused")
+    protected fun requestResponse(paths: List<String> = listOf(), timeOut: Int = 0, useAuthorizationBearer: String): Http.HttpStringResponse {
+        return executeRequest(method = Method.GET, paths = paths, timeout = timeOut, useAuthorizationToken = useAuthorizationBearer)
+    }
 }

@@ -91,6 +91,32 @@ open class Api(
                 "",
                 "No Url passed!"
             )
+        return executeOnMethod(http = http, method = method, timeout = timeout, payload = payload)
+    }
+
+    protected fun executeRequest(
+        method: Method,
+        paths: List<String>,
+        timeout: Int = 0,
+        useAuthorizationToken: String,
+        payload: String? = null
+    ): Http.HttpStringResponse {
+        val http = httpClient(paths, useAuthorizationToken)
+            ?: return Http.HttpStringResponse(
+                HttpURLConnection.HTTP_NOT_FOUND,
+                "",
+                "No Url passed!"
+            )
+        return executeOnMethod(http = http, method = method, timeout = timeout, payload = payload)
+    }
+
+    private fun executeOnMethod(
+        http: Http,
+        timeout: Int = 0,
+        method: Method,
+        payload: String? = null
+
+    ): Http.HttpStringResponse {
         return try {
             when (method) {
                 Method.GET -> http.Get(if (timeout == 0 || timeout < this.timeOut) this.timeOut else timeout)
@@ -121,6 +147,5 @@ open class Api(
             Http.HttpStringResponse(0, "", http.url.toString())
         }
     }
-
 
 }

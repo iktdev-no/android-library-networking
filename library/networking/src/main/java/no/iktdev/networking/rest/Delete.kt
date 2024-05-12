@@ -85,4 +85,15 @@ abstract class Delete(url: String?, definedAuthMode: Security.HttpAuthenticate =
         val payloadString = Gson().toJson(payload)
         return executeRequest(method = Method.DELETE, paths = paths, securityAuthMode = securityAuthMode, payload = payloadString)
     }
+
+    /**
+     * Will return response as raw String
+     * @param paths { url path after baseurl }
+     * @param payload Any object that can be converted to json using GSON
+     * @param securityAuthMode Uses authorization bearer token in Security. If undefined or null, exception will be thrown!!
+     */
+    protected fun request(paths: List<String> = listOf(), payload: Any, useAuthorizationBearer: String): Http.HttpStringResponse {
+        val payloadString = Gson().toJson(payload)
+        return executeRequest(method = Method.DELETE, paths = paths, useAuthorizationToken = useAuthorizationBearer, payload = payloadString)
+    }
 }
