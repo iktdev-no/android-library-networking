@@ -1,123 +1,193 @@
 package no.iktdev.networking.download
 
 import android.util.Log
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
+import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import no.iktdev.networking.client.Http
+import no.iktdev.networking.download.core.DownloadReportData
+import no.iktdev.networking.download.core.RemoteFileInformation
+import no.iktdev.networking.download.core.RemoteFileInformationData
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
+import java.io.InputStream
 import kotlin.math.roundToInt
 
+/**
+ * @param cacheDir where it can be internal cache or external
+ */
+class DownloadClient(val eventListener: DownloadEvents) {
+    private var downloadJob: Job? = null
+    private var isPaused = false
+    private var downloadedBytes = 0L
+    val bufferSize = 8 * 1024
+    private var isFailed = false
 
-data class RemoteFileInfo(
-    val fileName: String? = null,
-    val fileExtension: String? = null,
-    val fileSize: Double = -1.0
-)
+    private var remoteFileInformationData: RemoteFileInformationData? = null
+    private var progress: Int = 0
 
-class DownloadClient(val http: Http) {
-    val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
-    private val _progress = MutableLiveData<Int>(0)
-    val progress: LiveData<Int> = _progress
-
-    private val _state = MutableLiveData(DownloadState.NotStarted)
-    val state: LiveData<DownloadState> = _state
-
-
-    private val BUFFER_SIZE = 4096
-    private var rfi: RemoteFileInfo? = null
-    fun getRemoteFileInfo(): RemoteFileInfo? {
-        if (http.http.responseCode != HttpURLConnection.HTTP_OK)
-            return null
-
-        val conn = http.http
-        val _disp: String = conn.getHeaderField("Content-Disposition")
-
-        val size = if (!conn.getHeaderField("content-length").isNullOrEmpty())
-            conn.getHeaderField("content-length").toDouble() else
-            conn.contentLength.toDouble()
-
-        Log.d(
-            javaClass.name,
-            "Method => " + (conn.contentLength
-                .toString() + " :: " + conn.getHeaderField("content-length") + " <= Parsed").toString()
-        )
-
-        val fileName = if (_disp != null && _disp.indexOf("filename=") > 0) _disp.substring(
-            _disp.indexOf("filename=") + 10,
-            _disp.length - 1
-        ) else http.url.toString().let { url -> url.substring(url.toString().lastIndexOf("/") + 1) }
-
-        val extension = if (conn.contentType != null && conn.contentType
-                .contains("/")
-        ) conn.contentType.split("/".toRegex()).dropLastWhile { it.isEmpty() }
-            .toTypedArray().get(1) else  http.url.toString().let { url -> url.substring(url.toString().lastIndexOf(".") + 1) }
-        return RemoteFileInfo(
-            fileName = fileName,
-            fileExtension = extension,
-            fileSize = size
-        )
-    }
-
-    init {
-        rfi = getRemoteFileInfo()
-    }
-
-    suspend fun download(outFile: File? = null): File? {
-        val http = http.http
-        val rfi = rfi ?: return null
-
-        val target = outFile ?: withContext(Dispatchers.IO) {
-            File.createTempFile(rfi.fileName ?: "target", rfi.fileExtension)
+    var cacheDirectory: File? = null
+    private fun getCachedFile(fileName: String, suffix: String): File {
+        val cachedDirector = this.cacheDirectory
+        return if (cachedDirector != null && cachedDirector.exists()) {
+            File.createTempFile(fileName, suffix, cachedDirector)
+        } else {
+            File.createTempFile(fileName, suffix)
         }
+    }
 
-        scope.run {
 
-            _state.postValue(DownloadState.Started)
-            val inputStream = http.inputStream
-            val fos = FileOutputStream(target, false)
+    private fun resumeAbandonedDownload(client: Http, report: File) {
+        client.http.setRequestProperty("Range", "bytes=$downloadedBytes-")
+    }
 
-            var totalBytesRead = 0
-            val buffer = ByteArray(BUFFER_SIZE)
-            inputStream.apply {
-                fos.use { fout ->
-                    run {
-                        _state.postValue(DownloadState.Started)
-                        var bytesRead = read(buffer)
-                        while (bytesRead >= 0) {
-                            fout.write(buffer, 0, bytesRead)
-                            totalBytesRead += bytesRead
-                            bytesRead = read(buffer)
-                            sendProgress(totalBytesRead)
-                            // System.out.println(getProgress(totalBytesRead))
-                        }
-                    }
+    private fun getDownloadReport(reportFile: File): DownloadReportData? {
+        return if (reportFile.exists()) {
+            try {
+                Gson().fromJson(reportFile.readText(), DownloadReportData::class.java)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                reportFile.delete()
+                null
+            }
+        } else null
+    }
+
+    private suspend fun setProgress(fileName: String) {
+        val progress = remoteFileInformationData?.fileSize?.let { remoteSize ->
+            (downloadedBytes.toDouble() / remoteSize).roundToInt()
+        } ?: return
+        if (progress > this.progress) {
+            this.progress = progress
+        }
+        withContext(Dispatchers.Main) {
+            eventListener.onDownloadProgress(fileName, progress)
+        }
+    }
+
+    fun start(url: String, fileName: String) {
+        downloadJob = CoroutineScope(Dispatchers.IO + Job()).launch {
+            var report: DownloadReportData? = null
+            val downloadReport = getCachedFile("$fileName-report", ".json").also {
+                report = getDownloadReport(it)?.also { drd ->
+                    downloadedBytes = drd.bytesReceived.toLong()
+                }
+                if (!it.exists()) {
+                    it.createNewFile()
                 }
             }
-            inputStream.close()
-            fos.close()
-            _state.postValue(DownloadState.Completed)
+
+            val client = Http.getHttpByUrl(url)
+
+            remoteFileInformationData = RemoteFileInformation().getRemoteFileInformationData(client)
+
+            if (report != null && downloadedBytes > 0 && report?.remoteLength == remoteFileInformationData?.fileSize) {
+                resumeAbandonedDownload(client, downloadReport)
+                Log.i(this::class.java.simpleName, "Found abandoned download, resuming")
+            }
+            var downloadStream: InputStream? = null
+            var outputStream: FileOutputStream? = null
+            var tempFile: File? = null
+            try {
+                tempFile = getCachedFile(fileName, ".temp").also { tmpFile ->
+                    if (tmpFile.exists() && (report == null || downloadedBytes == 0L)) {
+                        tmpFile.delete()
+                    }
+                    if (!tmpFile.exists()) {
+                        tmpFile.createNewFile()
+                    }
+                }
+                client.http.connect()
+                downloadStream = client.http.inputStream
+                outputStream = FileOutputStream(tempFile, true)
+
+                val buffer = ByteArray(bufferSize)
+                var bytesRead: Int = 0
+
+                withContext(Dispatchers.Main) {
+                    eventListener.onDownloadStarted(fileName)
+                }
+
+                while (isActive && downloadStream.read(buffer).also { bytesRead = it } != -1) {
+                    if (isPaused) {
+                        delay(500)
+                        continue
+                    }
+                    outputStream.write(buffer, 0, bytesRead)
+                    downloadedBytes += bytesRead
+                    setProgress(fileName)
+                }
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+                isFailed = true
+                withContext(Dispatchers.Main) {
+                    eventListener.onDownloadFailed(fileName)
+                }
+            } finally {
+                downloadStream?.close()
+                outputStream?.close()
+                client.http.disconnect()
+                if (!isFailed && tempFile != null) {
+                    withContext(Dispatchers.Main) {
+                        eventListener.onDownloadCompleted(fileName, tempFile)
+                    }
+                } else {
+                    eventListener.onDownloadFailed(fileName)
+                    tempFile?.also { if (it.exists()) it.delete() }
+                    downloadReport.also { if (it.exists()) it.delete() }
+                }
+            }
+
         }
-        return target
     }
 
-    private var currentProgress = 0
-    private fun sendProgress(totalBytesRead: Int) {
-        val progress = (totalBytesRead * 100 / (rfi?.fileSize ?: 0.0) * 100).roundToInt()
-        if (progress > currentProgress) currentProgress = progress else return
-        _progress.postValue(currentProgress)
+    fun pause() {
+        isPaused = true
     }
 
-    enum class DownloadState {
-        NotStarted,
-        ReadingFileInfo,
-        Started,
-        Completed,
-        Failed
+    fun resume() {
+        isPaused = false
     }
+
+    fun cancel() {
+        downloadJob?.cancel()
+        downloadJob = null
+    }
+
+    suspend fun directDownload(url: String): ByteArray? = withContext(Dispatchers.IO) {
+        this.async {
+            val client = Http.getHttpByUrl(url).also {
+                it.http.connect()
+            }
+            var inputStream: InputStream? = null
+            var outputStream: ByteArrayOutputStream? = null
+
+            try {
+                inputStream = client.http.inputStream
+                outputStream = ByteArrayOutputStream()
+                val buffer = ByteArray(bufferSize)
+                var bytesRead: Int = 0
+
+                while (isActive && inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    outputStream.write(buffer, 0, bytesRead)
+                }
+
+            } finally {
+                client.http.disconnect()
+                inputStream?.close()
+                outputStream?.close()
+            }
+            outputStream?.toByteArray()
+        }.await()
+    }
+
 
 }
