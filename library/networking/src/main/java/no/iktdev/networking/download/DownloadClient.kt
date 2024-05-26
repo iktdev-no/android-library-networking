@@ -23,7 +23,7 @@ import kotlin.math.roundToInt
 /**
  * @param cacheDir where it can be internal cache or external
  */
-class DownloadClient(val eventListener: DownloadEvents) {
+class DownloadClient(val eventListener: DownloadEvents? = null) {
     private var downloadJob: Job? = null
     private var isPaused = false
     private var downloadedBytes = 0L
@@ -68,7 +68,7 @@ class DownloadClient(val eventListener: DownloadEvents) {
             this.progress = progress
         }
         withContext(Dispatchers.Main) {
-            eventListener.onDownloadProgress(fileName, progress)
+            eventListener?.onDownloadProgress(fileName, progress)
         }
     }
 
@@ -112,7 +112,7 @@ class DownloadClient(val eventListener: DownloadEvents) {
                 var bytesRead: Int = 0
 
                 withContext(Dispatchers.Main) {
-                    eventListener.onDownloadStarted(fileName)
+                    eventListener?.onDownloadStarted(fileName)
                 }
 
                 while (isActive && downloadStream.read(buffer).also { bytesRead = it } != -1) {
@@ -129,7 +129,7 @@ class DownloadClient(val eventListener: DownloadEvents) {
                 e.printStackTrace()
                 isFailed = true
                 withContext(Dispatchers.Main) {
-                    eventListener.onDownloadFailed(fileName)
+                    eventListener?.onDownloadFailed(fileName)
                 }
             } finally {
                 downloadStream?.close()
@@ -137,10 +137,10 @@ class DownloadClient(val eventListener: DownloadEvents) {
                 client.http.disconnect()
                 if (!isFailed && tempFile != null) {
                     withContext(Dispatchers.Main) {
-                        eventListener.onDownloadCompleted(fileName, tempFile)
+                        eventListener?.onDownloadCompleted(fileName, tempFile)
                     }
                 } else {
-                    eventListener.onDownloadFailed(fileName)
+                    eventListener?.onDownloadFailed(fileName)
                     tempFile?.also { if (it.exists()) it.delete() }
                     downloadReport.also { if (it.exists()) it.delete() }
                 }
