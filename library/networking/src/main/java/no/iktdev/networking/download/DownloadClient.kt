@@ -72,8 +72,8 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
         }
     }
 
-    fun start(url: String, fileName: String) {
-        downloadJob = CoroutineScope(Dispatchers.IO + Job()).launch {
+    fun start(url: String, fileName: String): Job {
+        val job = CoroutineScope(Dispatchers.IO + Job()).launch {
             var report: DownloadReportData? = null
             val downloadReport = getCachedFile("$fileName-report", ".json").also {
                 report = getDownloadReport(it)?.also { drd ->
@@ -146,7 +146,8 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
                 }
             }
 
-        }
+        }.also { downloadJob = it }
+        return job
     }
 
     fun pause() {
@@ -162,11 +163,13 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
         downloadJob = null
     }
 
-    suspend fun directDownload(url: String): ByteArray? = withContext(Dispatchers.IO) {
+    suspend fun directDownload(url: String, progress: (Int) -> Unit): ByteArray? = withContext(Dispatchers.IO) {
         this.async {
             val client = Http.getHttpByUrl(url).also {
                 it.http.connect()
             }
+            var previousDownloadedProgress = 0
+            val contentSize = RemoteFileInformation().getSizeFromHeader(client.http)
             var inputStream: InputStream? = null
             var outputStream: ByteArrayOutputStream? = null
 
@@ -178,6 +181,20 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
 
                 while (isActive && inputStream.read(buffer).also { bytesRead = it } != -1) {
                     outputStream.write(buffer, 0, bytesRead)
+                    downloadedBytes += bytesRead
+                    setProgress("")
+
+                    contentSize?.let { size ->
+                        val downloadedProgress = (downloadedBytes.toDouble() / size).roundToInt()
+                        if (downloadedProgress > previousDownloadedProgress) {
+                            withContext(Dispatchers.Main) {
+                                progress(downloadedProgress)
+                            }
+                            previousDownloadedProgress = downloadedProgress
+                        }
+                    }
+
+
                 }
 
             } finally {

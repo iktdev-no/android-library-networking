@@ -44,7 +44,7 @@ class RemoteFileInformation {
         }
     }
 
-    private fun getSizeFromHeader(connection: HttpURLConnection): Long? {
+    fun getSizeFromHeader(connection: HttpURLConnection): Long? {
         return try {
             val headerValue = connection.getHeaderField("Content-Length")
             if (headerValue.isNullOrBlank()) {
