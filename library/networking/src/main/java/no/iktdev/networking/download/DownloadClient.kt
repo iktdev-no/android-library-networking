@@ -119,11 +119,11 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
                     outputStream.write(buffer, 0, bytesRead)
                     downloadedBytes += bytesRead
 
-                    Log.d(this::class.simpleName, "$downloadedBytes/${remoteFileInformationData?.fileSize ?: 0} (Downloaded/Remote) ")
+                    // Log.d(this::class.simpleName, "$downloadedBytes/${remoteFileInformationData?.fileSize ?: 0} (Downloaded/Remote) ")
 
                     val progress = getProgress(downloadedBytes, remoteFileInformationData?.fileSize ?: 0)
                     if (progress > cachedProgress) {
-                        Log.d(this::class.simpleName, "Downloaded $progress% of $fileName")
+                       // Log.d(this::class.simpleName, "Downloaded $progress% of $fileName")
                         cachedProgress = progress
                         withContext(Dispatchers.Main) {
                             eventListener?.onDownloadProgress(fileName, progress)
