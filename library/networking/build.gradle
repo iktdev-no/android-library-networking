@@ -59,7 +59,7 @@ afterEvaluate {
             release(MavenPublication) {
                 groupId "no.iktdev.android"
                 artifactId "networking"
-                version '0.0.49.1'
+                version '1.0.4-internal'
 
                 artifact(bundleReleaseAar)
             }

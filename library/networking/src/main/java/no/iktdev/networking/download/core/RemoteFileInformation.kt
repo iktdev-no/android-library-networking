@@ -8,7 +8,8 @@ import java.net.HttpURLConnection
 
 class RemoteFileInformation {
 
-    fun getRemoteFileInformationData(client: Http): RemoteFileInformationData? {
+    fun getRemoteFileInformationData(url: String): RemoteFileInformationData? {
+        val client = Http.getHttpByUrl(url)
         if (!client.http.isOk()) {
             return null
         }

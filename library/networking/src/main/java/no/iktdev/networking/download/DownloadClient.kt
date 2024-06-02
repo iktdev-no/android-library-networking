@@ -31,7 +31,7 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
     private var isFailed = false
 
     private var remoteFileInformationData: RemoteFileInformationData? = null
-    private var progress: Int = 0
+    private var cachedProgress: Int = 0
 
     var cacheDirectory: File? = null
     private fun getCachedFile(fileName: String, suffix: String): File {
@@ -60,17 +60,10 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
         } else null
     }
 
-    private suspend fun setProgress(fileName: String) {
-        val progress = remoteFileInformationData?.fileSize?.let { remoteSize ->
-            (downloadedBytes.toDouble() / remoteSize).roundToInt()
-        } ?: return
-        if (progress > this.progress) {
-            this.progress = progress
-        }
-        withContext(Dispatchers.Main) {
-            eventListener?.onDownloadProgress(fileName, progress)
-        }
+    fun getProgress(downloadedLength: Long, remoteLength: Long): Int {
+        return (((downloadedLength.toDouble()) / remoteLength) * 100).roundToInt()
     }
+
 
     fun start(url: String, fileName: String): Job {
         val job = CoroutineScope(Dispatchers.IO + Job()).launch {
@@ -84,13 +77,15 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
                 }
             }
 
+            remoteFileInformationData = RemoteFileInformation().getRemoteFileInformationData(url).also {
+                eventListener?.onDownloadInformationObtained(it)
+            }
+
             val client = Http.getHttpByUrl(url)
 
-            remoteFileInformationData = RemoteFileInformation().getRemoteFileInformationData(client)
-
             if (report != null && downloadedBytes > 0 && report?.remoteLength == remoteFileInformationData?.fileSize) {
-                resumeAbandonedDownload(client, downloadReport)
                 Log.i(this::class.java.simpleName, "Found abandoned download, resuming")
+                resumeAbandonedDownload(client, downloadReport)
             }
             var downloadStream: InputStream? = null
             var outputStream: FileOutputStream? = null
@@ -104,6 +99,7 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
                         tmpFile.createNewFile()
                     }
                 }
+                Log.i(this::class.simpleName, "Downloading into: ${tempFile.absolutePath}")
                 client.http.connect()
                 downloadStream = client.http.inputStream
                 outputStream = FileOutputStream(tempFile, true)
@@ -112,7 +108,7 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
                 var bytesRead: Int = 0
 
                 withContext(Dispatchers.Main) {
-                    eventListener?.onDownloadStarted(fileName)
+                    eventListener?.onDownloadStarted(fileName, tempFile)
                 }
 
                 while (isActive && downloadStream.read(buffer).also { bytesRead = it } != -1) {
@@ -122,14 +118,24 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
                     }
                     outputStream.write(buffer, 0, bytesRead)
                     downloadedBytes += bytesRead
-                    setProgress(fileName)
+
+                    Log.d(this::class.simpleName, "$downloadedBytes/${remoteFileInformationData?.fileSize ?: 0} (Downloaded/Remote) ")
+
+                    val progress = getProgress(downloadedBytes, remoteFileInformationData?.fileSize ?: 0)
+                    if (progress > cachedProgress) {
+                        Log.d(this::class.simpleName, "Downloaded $progress% of $fileName")
+                        cachedProgress = progress
+                        withContext(Dispatchers.Main) {
+                            eventListener?.onDownloadProgress(fileName, progress)
+                        }
+                    }
                 }
 
             } catch (e: Exception) {
                 e.printStackTrace()
                 isFailed = true
                 withContext(Dispatchers.Main) {
-                    eventListener?.onDownloadFailed(fileName)
+                    eventListener?.onDownloadFailed(fileName, tempFile)
                 }
             } finally {
                 downloadStream?.close()
@@ -140,14 +146,24 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
                         eventListener?.onDownloadCompleted(fileName, tempFile)
                     }
                 } else {
-                    eventListener?.onDownloadFailed(fileName)
+                    eventListener?.onDownloadFailed(fileName, tempFile)
                     tempFile?.also { if (it.exists()) it.delete() }
                     downloadReport.also { if (it.exists()) it.delete() }
                 }
             }
+            writeReport(downloadReport, tempFile, remoteFileInformationData?.fileSize ?: -1)
 
         }.also { downloadJob = it }
         return job
+    }
+
+    private fun writeReport(reportFile: File, outFile: File?, remoteLength: Long) {
+        val report = DownloadReportData(
+            outFile = outFile?.absolutePath,
+            bytesReceived = this.downloadedBytes,
+            remoteLength = remoteLength
+        )
+        reportFile.writeText(Gson().toJson(report))
     }
 
     fun pause() {
@@ -182,7 +198,6 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
                 while (isActive && inputStream.read(buffer).also { bytesRead = it } != -1) {
                     outputStream.write(buffer, 0, bytesRead)
                     downloadedBytes += bytesRead
-                    setProgress("")
 
                     contentSize?.let { size ->
                         val downloadedProgress = (downloadedBytes.toDouble() / size).roundToInt()
