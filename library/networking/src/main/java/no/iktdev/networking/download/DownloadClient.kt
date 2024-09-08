@@ -1,7 +1,12 @@
+@file:OptIn(ExperimentalStdlibApi::class)
+
 package no.iktdev.networking.download
 
+import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -10,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import no.iktdev.networking.client.Http
 import no.iktdev.networking.download.core.DownloadReportData
 import no.iktdev.networking.download.core.RemoteFileInformation
@@ -23,23 +29,39 @@ import kotlin.math.roundToInt
 /**
  * @param cacheDir where it can be internal cache or external
  */
-class DownloadClient(val eventListener: DownloadEvents? = null) {
+class DownloadClient(val context: Context, val scope: CoroutineScope, val eventListener: DownloadEvents? = null) {
+    var downloadClientCacheDirName = "iktdev_download_cache"
     private var downloadJob: Job? = null
     private var isPaused = false
     private var downloadedBytes = 0L
     val bufferSize = 8 * 1024
     private var isFailed = false
+    private var isCanceled = false
 
     private var remoteFileInformationData: RemoteFileInformationData? = null
     private var cachedProgress: Int = 0
 
     var cacheDirectory: File? = null
+
+    init {
+        require(scope.coroutineContext[CoroutineDispatcher.Key] == Dispatchers.IO) {
+            "DownloadManager requires a CoroutineScope with Dispatchers.IO"
+        }
+    }
+
     private fun getCachedFile(fileName: String, suffix: String): File {
-        val cachedDirector = this.cacheDirectory
-        return if (cachedDirector != null && cachedDirector.exists()) {
-            File.createTempFile(fileName, suffix, cachedDirector)
-        } else {
-            File.createTempFile(fileName, suffix)
+        val cacheDir = if (cacheDirectory == null) { context.cacheDir } else cacheDirectory
+
+        val myCacheDir = File(cacheDir, downloadClientCacheDirName).also {
+            if (!it.exists()) {
+                it.mkdir()
+            }
+        }
+        return File(myCacheDir, "$fileName.$suffix").also {
+            if (it.exists()) {
+                it.delete()
+            }
+            it.createNewFile()
         }
     }
 
@@ -66,9 +88,9 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
 
 
     fun start(url: String, fileName: String): Job {
-        val job = CoroutineScope(Dispatchers.IO + Job()).launch {
+        val job = scope.launch {
             var report: DownloadReportData? = null
-            val downloadReport = getCachedFile("$fileName-report", ".json").also {
+            val downloadReport = getCachedFile("$fileName-report", "json").also {
                 report = getDownloadReport(it)?.also { drd ->
                     downloadedBytes = drd.bytesReceived.toLong()
                 }
@@ -91,7 +113,7 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
             var outputStream: FileOutputStream? = null
             var tempFile: File? = null
             try {
-                tempFile = getCachedFile(fileName, ".temp").also { tmpFile ->
+                tempFile = getCachedFile(fileName, "temp").also { tmpFile ->
                     if (tmpFile.exists() && (report == null || downloadedBytes == 0L)) {
                         tmpFile.delete()
                     }
@@ -129,22 +151,32 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
                             eventListener?.onDownloadProgress(fileName, progress)
                         }
                     }
+                    yield()
                 }
 
             } catch (e: Exception) {
-                e.printStackTrace()
-                isFailed = true
-                withContext(Dispatchers.Main) {
-                    eventListener?.onDownloadFailed(fileName, tempFile)
+                if (e is CancellationException) {
+                    isCanceled = true
+                    withContext(Dispatchers.Main) {
+                        eventListener?.onDownloadCanceled(fileName, tempFile)
+                    }
+                } else {
+                    e.printStackTrace()
+                    isFailed = true
+                    withContext(Dispatchers.Main) {
+                        eventListener?.onDownloadFailed(fileName, tempFile)
+                    }
                 }
             } finally {
                 downloadStream?.close()
                 outputStream?.close()
                 client.http.disconnect()
-                if (!isFailed && tempFile != null) {
+                if (!isFailed && !isCanceled && tempFile != null) {
                     withContext(Dispatchers.Main) {
                         eventListener?.onDownloadCompleted(fileName, tempFile)
                     }
+                } else if (isCanceled) {
+                    eventListener?.onDownloadCanceled(fileName, tempFile)
                 } else {
                     eventListener?.onDownloadFailed(fileName, tempFile)
                     tempFile?.also { if (it.exists()) it.delete() }
@@ -179,8 +211,8 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
         downloadJob = null
     }
 
-    suspend fun directDownload(url: String, progress: (Int) -> Unit): ByteArray? = withContext(Dispatchers.IO) {
-        this.async {
+    suspend fun directDownload(url: String, progress: (Int) -> Unit): ByteArray? {
+        return scope.async {
             val client = Http.getHttpByUrl(url).also {
                 it.http.connect()
             }
@@ -211,7 +243,8 @@ class DownloadClient(val eventListener: DownloadEvents? = null) {
 
 
                 }
-
+            } catch (e: Exception) {
+                e.printStackTrace()
             } finally {
                 client.http.disconnect()
                 inputStream?.close()

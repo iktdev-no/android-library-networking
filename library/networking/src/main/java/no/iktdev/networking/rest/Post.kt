@@ -37,7 +37,8 @@ abstract class Post(url: String?, definedAuthMode: Security.HttpAuthenticate = S
             Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, http.url.toString())
         } catch(e: Exception) {
             e.printStackTrace()
-            Http.HttpObjectResponse(0, null, http.url.toString())
+            Http.HttpObjectResponse(-1, null, http.url.toString())
+            //throw RuntimeException("Unable to decode response")
         }
     }
 
@@ -70,7 +71,7 @@ abstract class Post(url: String?, definedAuthMode: Security.HttpAuthenticate = S
             Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, http.url.toString())
         } catch(e: Exception) {
             e.printStackTrace()
-            Http.HttpObjectResponse(0, null, http.url.toString())
+            Http.HttpObjectResponse(-1, null, http.url.toString())
         }
     }
 

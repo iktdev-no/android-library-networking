@@ -7,12 +7,12 @@ import java.io.BufferedReader
 import java.io.DataOutputStream
 import java.io.FileNotFoundException
 import java.io.InputStreamReader
-import java.lang.Exception
 import java.lang.reflect.Type
 import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
+import kotlin.Exception
 
 abstract class HttpMethodImplementation(val url: URL) {
     abstract val http: HttpURLConnection
@@ -114,33 +114,37 @@ abstract class HttpMethodImplementation(val url: URL) {
 
     inline fun <reified T> getObjectFromHttp(http: HttpURLConnection): Http.HttpObjectResponse<T?>
     {
-        val reader = BufferedReader(InputStreamReader(http.inputStream))
-        val builder: StringBuilder = StringBuilder()
+        try {
+            val reader = BufferedReader(InputStreamReader(http.inputStream))
+            val builder: StringBuilder = StringBuilder()
 
-        var line: String?
-        while (reader.readLine().also { line = it } != null)
-        {
-            builder.appendLine(line)
-        }
-
-        http.inputStream.close()
-        reader.close()
-        val content = builder.toString()
-        return try {
-            val type = object: TypeToken<T>() {}.type
-            val deserialized = Gson().fromJson<T>(content, type)
-            //val deserialized = fromJsonToObject<T>(content, type) //Gson().fromJson(builder.toString(), )
-            Http.HttpObjectResponse(http.responseCode, deserialized, http.url.toString())
-        } catch (e: Exception) {
-            Log.e("Decode to ${T::class.java} failed", content)
-            if (http.contentType == "application/json" || http.contentType.contains("json"))
-                throw e
-            else {
-                Log.e("Avoided THROW", "As content type is not json, throwing will not propagate to system")
-                Http.HttpObjectResponse(http.responseCode, null, http.url.toString())
+            var line: String?
+            while (reader.readLine().also { line = it } != null)
+            {
+                builder.appendLine(line)
             }
-        }
 
+            http.inputStream.close()
+            reader.close()
+            val content = builder.toString()
+            return try {
+                val type = object: TypeToken<T>() {}.type
+                val deserialized = Gson().fromJson<T>(content, type)
+                //val deserialized = fromJsonToObject<T>(content, type) //Gson().fromJson(builder.toString(), )
+                Http.HttpObjectResponse(http.responseCode, deserialized, http.url.toString())
+            } catch (e: Exception) {
+                Log.e("Decode to ${T::class.java} failed", content)
+                if (http.contentType == "application/json" || http.contentType.contains("json"))
+                    throw e
+                else {
+                    Log.e("Avoided THROW", "As content type is not json, throwing will not propagate to system")
+                    Http.HttpObjectResponse(http.responseCode, null, http.url.toString())
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return Http.HttpObjectResponse(http.responseCode, null, http.url.toString())
     }
 
     data class PayloadRequestBuilder(

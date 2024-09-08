@@ -10,4 +10,5 @@ interface DownloadEvents {
     fun onDownloadProgress(fileName: String, progress: Int) {}
     fun onDownloadCompleted(fileName: String, file: File) {}
     fun onDownloadFailed(fileName: String, file: File?) {}
+    fun onDownloadCanceled(fileName: String, file: File?) {}
 }
