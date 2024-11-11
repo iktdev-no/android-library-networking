@@ -28,21 +28,7 @@ class ndsDiscovery(context: Context, val serviceName: String, var listener: ndsD
                     }
 
                     override fun onServiceResolved(resolvedServiceInfo: NsdServiceInfo) {
-                        val name = resolvedServiceInfo.serviceName
-                        val host = resolvedServiceInfo.host?.hostAddress
-                        val port = resolvedServiceInfo.port ?: 80
-                        val attrs = resolvedServiceInfo.attributes.mapValues { String(it.value) }
-                        val url = attrs["url"] ?: ""
-                        Log.d("NsdHelper", "Service resolved: ${resolvedServiceInfo.host}")
-
-                        host?.let {
-                            ndsData(
-                                name = name,
-                                ip = it,
-                                port = port,
-                                url = url
-                            )
-                        }?.also { listener.onResolved(it) }
+                        listener.onResolved(resolvedServiceInfo)
                     }
                 })
             }
