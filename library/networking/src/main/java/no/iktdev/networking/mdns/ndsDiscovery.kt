@@ -41,7 +41,7 @@ class ndsDiscovery(context: Context, val serviceName: String, var listener: ndsD
         override fun onServiceLost(serviceInfo: NsdServiceInfo?) {
             serviceInfo?.let { info ->
                 Log.d("NsdHelper", "Service lost: ${info.serviceName}")
-                listener.onLost(info.host, info.serviceName)
+                listener.onLost(info)
             }
         }
 
