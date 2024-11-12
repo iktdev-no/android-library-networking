@@ -11,7 +11,6 @@ import kotlinx.coroutines.launch
 import no.iktdev.demoapplication.databinding.ActivityMainBinding
 import no.iktdev.networking.mdns.ndsDiscovery
 import no.iktdev.networking.mdns.ndsDiscoveryListener
-import java.net.InetAddress
 
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,7 +30,7 @@ class MainActivity : AppCompatActivity() {
                     TODO("Not yet implemented")
                 }
 
-                override fun onLost(hostAddress: InetAddress, serviceName: String) {
+                override fun onLost(hostAddress: NsdServiceInfo, serviceName: String) {
                     TODO("Not yet implemented")
                 }
 
