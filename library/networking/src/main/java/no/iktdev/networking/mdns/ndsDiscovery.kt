@@ -18,26 +18,31 @@ class ndsDiscovery(context: Context, val serviceName: String, var listener: ndsD
             Log.d("NsdHelper", "Discovery started for service type: $serviceType")
         }
 
-        override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-            Log.d("NsdHelper", "Service found: ${serviceInfo.serviceName}, type: ${serviceInfo.serviceType}")
-            if (serviceInfo.serviceType.trim('.') == serviceName.trim('.')) {
-                nsdManager?.resolveService(serviceInfo, object : NsdManager.ResolveListener {
-                    override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {
-                        serviceInfo?.let { info -> listener.onResolveFailed(info, errorCode) }
-                        Log.e("NsdHelper", "Resolve failed: $errorCode")
-                    }
+        override fun onServiceFound(serviceInfo: NsdServiceInfo?) {
+            serviceInfo?.let { info ->
+                Log.d("NsdHelper", "Service found: ${info.serviceName}, type: ${info.serviceType}")
+                if (info.serviceType.trim('.') == serviceName.trim('.')) {
+                    nsdManager?.resolveService(info, object : NsdManager.ResolveListener {
+                        override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {
+                            serviceInfo?.let { info -> listener.onResolveFailed(info, errorCode) }
+                            Log.e("NsdHelper", "Resolve failed: $errorCode")
+                        }
 
-                    override fun onServiceResolved(resolvedServiceInfo: NsdServiceInfo) {
-                        listener.onResolved(resolvedServiceInfo)
-                    }
-                })
+                        override fun onServiceResolved(resolvedServiceInfo: NsdServiceInfo?) {
+                            resolvedServiceInfo?.let { info ->
+                                listener.onResolved(info)
+                            }
+                        }
+                    })
+                }
             }
         }
 
-        override fun onServiceLost(serviceInfo: NsdServiceInfo) {
-            Log.d("NsdHelper", "Service lost: ${serviceInfo.serviceName}")
-            listener.onLost(serviceInfo.host, serviceInfo.serviceName)
-
+        override fun onServiceLost(serviceInfo: NsdServiceInfo?) {
+            serviceInfo?.let { info ->
+                Log.d("NsdHelper", "Service lost: ${info.serviceName}")
+                listener.onLost(info.host, info.serviceName)
+            }
         }
 
         override fun onDiscoveryStopped(serviceType: String) {
