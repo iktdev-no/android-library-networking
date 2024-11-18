@@ -211,7 +211,13 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
         downloadJob = null
     }
 
-    suspend fun directDownload(url: String, progress: (Int) -> Unit): ByteArray? {
+    suspend fun directDownload(url: String, progress: (Int) -> Unit?): ByteArray? {
+        Log.i(this::class.simpleName, "directDownload url: $url")
+        if (url.isNullOrBlank()) {
+            throw RuntimeException("Provided url is null or blank!")
+        } else if (!url.contains("http")) {
+            throw RuntimeException("Provided url does not contain http or https")
+        }
         return scope.async {
             val client = Http.getHttpByUrl(url).also {
                 it.http.connect()
