@@ -35,7 +35,7 @@ abstract class Delete(url: String?, definedAuthMode: Security.HttpAuthenticate =
             Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, urlBuilder.toUrl())
         } catch(e: Exception) {
             e.printStackTrace()
-            Http.HttpObjectResponse(0, null, urlBuilder.toUrl())
+            Http.HttpObjectResponse(0, null, urlBuilder.toUrl(), e.message)
         }
     }
 
@@ -67,7 +67,7 @@ abstract class Delete(url: String?, definedAuthMode: Security.HttpAuthenticate =
             Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, urlBuilder.toUrl())
         } catch(e: Exception) {
             e.printStackTrace()
-            Http.HttpObjectResponse(0, null, urlBuilder.toUrl())
+            Http.HttpObjectResponse(0, null, urlBuilder.toUrl(), e.message)
         }
     }
 

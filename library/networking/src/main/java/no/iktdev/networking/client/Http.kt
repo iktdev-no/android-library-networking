@@ -44,7 +44,7 @@ abstract class Http(url: URL): HttpMethodImplementation(url) {
         }
     }
 
-    data class HttpObjectResponse<T>(val status: Int, val result: T?, val url: String)
-    data class HttpStringResponse(val status: Int, val result: String, val url: String)
+    data class HttpObjectResponse<T>(val status: Int, val result: T?, val url: String, val error: String? = null)
+    data class HttpStringResponse(val status: Int, val result: String, val url: String, val error: String? = null)
 
 }

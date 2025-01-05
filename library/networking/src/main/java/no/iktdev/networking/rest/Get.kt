@@ -30,7 +30,7 @@ abstract class Get(url: String?, definedAuthMode: Security.HttpAuthenticate = Se
             Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, urlBuilder.toUrl())
         } catch (e: Exception) {
             e.printStackTrace()
-            Http.HttpObjectResponse(0, null, urlBuilder.toUrl())
+            Http.HttpObjectResponse(0, null, urlBuilder.toUrl(), e.message)
         }
     }
     protected inline fun <reified T> request(vararg parts: String, timeOut: Int = 0, useAuthorizationBearer: String): Http.HttpObjectResponse<T?> {
@@ -59,7 +59,7 @@ abstract class Get(url: String?, definedAuthMode: Security.HttpAuthenticate = Se
             Http.HttpObjectResponse(HttpURLConnection.HTTP_NOT_FOUND, null, urlBuilder.toUrl())
         } catch (e: Exception) {
             e.printStackTrace()
-            Http.HttpObjectResponse(0, null, urlBuilder.toUrl())
+            Http.HttpObjectResponse(0, null, urlBuilder.toUrl(), e.message)
         }
     }
     protected inline fun <reified T> request(vararg parts: String, timeOut: Int = 0, securityAuthMode: Security.HttpAuthenticate = Security.HttpAuthenticate.Defaults): Http.HttpObjectResponse<T?> {
