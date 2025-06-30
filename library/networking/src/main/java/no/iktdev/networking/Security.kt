@@ -56,8 +56,6 @@ class Security {
     fun disableHttpsSecurity(http: HttpsURLConnection) {
         http.hostnameVerifier = name
         http.sslSocketFactory = ssl()
-        /*HttpsURLConnection.setDefaultHostnameVerifier(name)
-        HttpsURLConnection.setDefaultSSLSocketFactory(ssl())*/
     }
 
     fun setAuthorizationBearer(http: HttpsURLConnection) {
@@ -68,14 +66,6 @@ class Security {
     }
 
     class AuthorizationBearerNotConfigured(override val message: String?): RuntimeException()
-
-    /*fun getToken(): String? {
-        val fingerprint = App.connection().getServer()?.fingerprint;
-
-        return if (fingerprint != null) {
-            Get2().accessObject(fingerprint)?.jwt?.token
-        } else {""}
-    }*/
 
     enum class HttpAuthenticate {
         DoAuth,

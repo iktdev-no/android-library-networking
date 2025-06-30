@@ -10,8 +10,6 @@ class UrlBuilder(val url: String) {
         private set
     var domain: String = ""
         private set
-    var port: Int = 80
-        private set
     var path: List<String> = listOf()
         private set
 
@@ -50,8 +48,6 @@ class UrlBuilder(val url: String) {
     }
 
     @Suppress("unused")
-    fun port(port: Int = 80) = apply { this.port = port }
-    @Suppress("unused")
     fun to(path: String) = apply { if (path.isNotEmpty()) this.path += (path) }
     fun with(paths: List<String>) = apply {
         this.path += (paths.filter { it.isNotEmpty() })
@@ -63,23 +59,11 @@ class UrlBuilder(val url: String) {
 
     fun toUrl(): String {
         _url = (if (protocol == Protocol.HTTPS) "https" else "http") + "://" + domain
-        if (port != 80)
-            _url += ":80"
         _url += "/"
         _url += path.joinToString("/")
-        return _url
+        return _url.trimEnd('/')
     }
 
-    /*
-        private fun toQuery(params: Map<String, String>): String?
-    {
-        val query: Uri.Builder = Uri.Builder()
-        params.map {
-            query.appendQueryParameter(it.key, it.value)
-        }
-        return query.build().encodedQuery
-    }
-    * */
 
     fun asURL(): URL {
         return URL(toUrl())
