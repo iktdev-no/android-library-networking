@@ -30,7 +30,7 @@ class MainActivity : AppCompatActivity() {
                     TODO("Not yet implemented")
                 }
 
-                override fun onLost(hostAddress: NsdServiceInfo, serviceName: String) {
+                override fun onLost(hostAddress: NsdServiceInfo) {
                     TODO("Not yet implemented")
                 }
 
