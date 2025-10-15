@@ -102,131 +102,72 @@ open class DefaultClient {
         )
     }
 
+    class HttpConnectionConstructionException(val response: HttpResponse<Nothing>): Exception(response.error)
+    fun prepareConnection(method: HttpMethods, doOutput: Boolean = false): HttpURLConnection {
+        val url = getUrl() ?: throw HttpConnectionConstructionException(HttpResponse(-1, null, "Failed to create url!",
+            HttpRequest(address = this@DefaultClient.url ?: "Not set", url = "Not set")
+        ))
 
-    suspend inline fun <reified T> get(): HttpResponse<T> = withContext(Dispatchers.IO) {
-        val url = getUrl() ?: return@withContext HttpResponse(-201, null, "Failed to create url!",
-            HttpRequest(
-                address = this@DefaultClient.url ?: "Not set",
-                url = "Not set"
-            )
-        )
-        val connection = asConnection(url) ?: return@withContext HttpResponse(-1, null, "Failed to create HTTP connection",
-            HttpRequest(
-                address = this@DefaultClient.url ?: "Not set",
-                url = url.toString()
-            )
-        )
-        connection.requestMethod = "GET"
-        try {
-            connection.tryConnect()
-            connection.read()
-        } catch (e: ReadObjectException) {
-            return@withContext e.httpResponse.toTypeParameter()
-        } catch (e: HttpConnectionException) {
-            return@withContext e.httpResponse.toTypeParameter()
-        } catch (e: Exception) {
-            exceptionHandler?.invoke(e) ?: e.printStackTrace()
-            return@withContext e.toHttpResponse().toTypeParameter()
+        val connection = asConnection(url) ?: throw HttpConnectionConstructionException(HttpResponse(0, null, "Failed to create HTTP connection",
+            HttpRequest(address = this@DefaultClient.url ?: "Not set", url = url.toString())
+        ))
+
+        connection.requestMethod = method.name
+        connection.doOutput = doOutput
+        connection.tryConnect()
+
+        return connection
+    }
+
+    fun preparePayload(data: Any?): String {
+        return when (data) {
+            is String, Int, Long, Float, Boolean, Char -> data.toString()
+            else -> Gson().toJson(data)
         }
     }
 
-    suspend inline fun <reified T> post(data: Any): HttpResponse<T> = withContext(Dispatchers.IO) {
-        val url = getUrl() ?: return@withContext HttpResponse(-1, null, "Failed to create url!",
-            HttpRequest(
-                address = this@DefaultClient.url ?: "Not set",
-                url = "Not set"
-            )
-        )
-        val connection = asConnection(url) ?: return@withContext HttpResponse(0, null, "Failed to create HTTP connection",
-            HttpRequest(
-                address = this@DefaultClient.url ?: "Not set",
-                url = url.toString()
-            )
-        )
-        connection.requestMethod = "POST"
-        connection.doOutput = true
-        try {
-            connection.tryConnect()
-            val dos = DataOutputStream(connection.outputStream)
-            val payload = Gson().toJson(data)
-            dos.writeBytes(payload)
-            dos.flush()
-            connection.read()
-        } catch (e: ReadObjectException) {
-            return@withContext e.httpResponse.toTypeParameter()
-        } catch (e: HttpConnectionException) {
-            return@withContext e.httpResponse.toTypeParameter()
-        } catch (e: Exception) {
-            exceptionHandler?.invoke(e) ?: e.printStackTrace()
-            return@withContext e.toHttpResponse().toTypeParameter()
-        }
+    fun sendPayload(connection: HttpURLConnection, payload: String?) {
+        if (payload == null) return
+        val dos = DataOutputStream(connection.outputStream)
+        dos.writeBytes(payload)
+        dos.flush()
     }
 
-    suspend inline fun <reified T> put(data: Any): HttpResponse<T> = withContext(Dispatchers.IO) {
-        val url = getUrl() ?: return@withContext HttpResponse(-1, null, "Failed to create url!",
-            HttpRequest(
-                address = this@DefaultClient.url ?: "Not set",
-                url = "Not set"
-            )
-        )
-        val connection = asConnection(url) ?: return@withContext HttpResponse(0, null, "Failed to create HTTP connection",
-            HttpRequest(
-                address = this@DefaultClient.url ?: "Not set",
-                url = url.toString()
-            )
-        )
-        connection.requestMethod = "PUT"
-        connection.doOutput = true
+    suspend inline fun <reified T> executeRequest(
+        method: HttpMethods,
+        data: Any? = null
+    ): HttpResponse<T> = withContext(Dispatchers.IO) {
         try {
-            connection.tryConnect()
-            val dos = DataOutputStream(connection.outputStream)
-            val payload = Gson().toJson(data)
-            dos.writeBytes(payload)
-            dos.flush()
-            connection.read()
-        } catch (e: ReadObjectException) {
-            return@withContext e.httpResponse.toTypeParameter()
-        } catch (e: HttpConnectionException) {
-            return@withContext e.httpResponse.toTypeParameter()
-        } catch (e: Exception) {
-            exceptionHandler?.invoke(e) ?: e.printStackTrace()
-            return@withContext e.toHttpResponse().toTypeParameter()
-        }
-    }
-
-    suspend inline fun <reified T> delete(data: Any? = null): HttpResponse<T> = withContext(Dispatchers.IO) {
-        val url = getUrl() ?: return@withContext HttpResponse(-1, null, "Failed to create url!",
-            HttpRequest(
-                address = this@DefaultClient.url ?: "Not set",
-                url = "Not set"
-            )
-        )
-        val connection = asConnection(url) ?: return@withContext HttpResponse(0, null, "Failed to create HTTP connection",
-            HttpRequest(
-                address = this@DefaultClient.url ?: "Not set",
-                url = url.toString()
-            )
-        )
-        connection.requestMethod = "DELETE"
-        connection.doOutput = true
-        try {
-            connection.tryConnect()
-            if (data != null) {
-                val dos = DataOutputStream(connection.outputStream)
-                val payload = Gson().toJson(data)
-                dos.writeBytes(payload)
-                dos.flush()
+            val connection = prepareConnection(method, doOutput = data != null)
+            if (method in listOf(HttpMethods.POST, HttpMethods.DELETE, HttpMethods.PUT)) {
+                val payload = preparePayload(data)
+                sendPayload(connection, payload)
             }
             connection.read()
         } catch (e: ReadObjectException) {
-            return@withContext e.httpResponse.toTypeParameter()
+            e.httpResponse.toTypeParameter()
         } catch (e: HttpConnectionException) {
-            return@withContext e.httpResponse.toTypeParameter()
+            e.httpResponse.toTypeParameter()
         } catch (e: Exception) {
             exceptionHandler?.invoke(e) ?: e.printStackTrace()
-            return@withContext e.toHttpResponse().toTypeParameter()
+            e.toHttpResponse().toTypeParameter()
         }
     }
+
+    enum class HttpMethods {
+        GET,
+        POST,
+        PUT,
+        DELETE
+    }
+
+    suspend inline fun <reified T> get(): HttpResponse<T> = executeRequest(HttpMethods.GET)
+    suspend inline fun <reified T> post(data: Any): HttpResponse<T> = executeRequest(HttpMethods.POST, data)
+    suspend inline fun <reified T> put(data: Any): HttpResponse<T> = executeRequest(HttpMethods.PUT, data)
+    suspend inline fun <reified T> delete(data: Any? = null): HttpResponse<T> = executeRequest(HttpMethods.DELETE, data)
+
+
+
 
     fun HttpURLConnection.tryConnect() {
         try {
