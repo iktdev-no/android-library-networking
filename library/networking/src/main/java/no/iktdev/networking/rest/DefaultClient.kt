@@ -139,7 +139,7 @@ open class DefaultClient {
     ): HttpResponse<T> = withContext(Dispatchers.IO) {
         try {
             val connection = prepareConnection(method, doOutput = data != null)
-            if (method in listOf(HttpMethods.POST, HttpMethods.DELETE, HttpMethods.PUT)) {
+            if (method in listOf(HttpMethods.POST, HttpMethods.DELETE, HttpMethods.PUT, HttpMethods.PATCH)) {
                 val payload = preparePayload(data)
                 sendPayload(connection, payload)
             }
@@ -158,12 +158,14 @@ open class DefaultClient {
         GET,
         POST,
         PUT,
+        PATCH,
         DELETE
     }
 
     suspend inline fun <reified T> get(): HttpResponse<T> = executeRequest(HttpMethods.GET)
     suspend inline fun <reified T> post(data: Any): HttpResponse<T> = executeRequest(HttpMethods.POST, data)
     suspend inline fun <reified T> put(data: Any): HttpResponse<T> = executeRequest(HttpMethods.PUT, data)
+    suspend inline fun <reified T> patch(data: Any): HttpResponse<T> = executeRequest(HttpMethods.PATCH, data)
     suspend inline fun <reified T> delete(data: Any? = null): HttpResponse<T> = executeRequest(HttpMethods.DELETE, data)
 
 
