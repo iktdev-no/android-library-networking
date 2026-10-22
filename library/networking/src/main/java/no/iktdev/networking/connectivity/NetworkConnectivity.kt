@@ -23,6 +23,10 @@ data class NetworkLinkDetails(
     val dnsServers: List<String>,
     val routes: List<String>,
     val domains: String?,
+    /** Whether Android Private DNS is active; available from API 28, otherwise `null`. */
+    val privateDnsActive: Boolean?,
+    /** Strict Private DNS provider hostname, when configured and available from API 28. */
+    val privateDnsServerName: String?,
     /** Available on Android API 29 and newer; `null` on older supported API levels. */
     val mtu: Int?
 )
@@ -158,6 +162,8 @@ class NetworkConnectivityMonitor(context: Context) {
             "${route.destination} via $gateway${if (route.isDefaultRoute) " (default)" else ""}"
         },
         domains = domains,
+        privateDnsActive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isPrivateDnsActive else null,
+        privateDnsServerName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) privateDnsServerName else null,
         mtu = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) mtu else null
     )
 
