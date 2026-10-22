@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
 }
 
 android {
@@ -31,10 +30,13 @@ android {
         sourceCompatibility javaVersion
         targetCompatibility javaVersion
     }
-    kotlinOptions {
-        jvmTarget = kotlinJvmTarget
-    }
     namespace 'no.iktdev.demoapplication'
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
+    }
 }
 
 dependencies {

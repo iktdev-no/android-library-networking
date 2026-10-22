@@ -48,13 +48,16 @@ class UrlBuilder(val url: String) {
     }
 
     @Suppress("unused")
-    fun to(path: String) = apply { if (path.isNotEmpty()) this.path += (path) }
+    fun to(path: String) = apply {
+        this.path += path.split("/").filter { it.isNotEmpty() }
+    }
+
     fun with(paths: List<String>) = apply {
-        this.path += (paths.filter { it.isNotEmpty() })
+        this.path += paths.flatMap { it.split("/") }.filter { it.isNotEmpty() }
     }
 
     fun with(vararg parts: String) = apply {
-        this.path += parts.filter { it.isNotEmpty() }.toList()
+        this.path += parts.flatMap { it.split("/") }.filter { it.isNotEmpty() }
     }
 
     fun toUrl(): String {

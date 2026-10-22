@@ -9,6 +9,7 @@ import no.iktdev.networking.UrlBuilder
 import java.io.DataOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.security.SecureRandom
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
@@ -59,14 +60,36 @@ open class DefaultClient {
     private var paths: List<String> = listOf()
     fun withPaths(vararg part: String) = apply {
         this.paths = part.toList()
+        this.queryParams = emptyList()
+    }
+
+    private var queryParams: List<String> = emptyList()
+
+    /** Sets encoded query parameters for the current path. Call after [withPaths]; null values are omitted. */
+    fun withQueryParams(vararg params: Pair<String, Any?>) = apply {
+        this.queryParams = params.mapNotNull { (name, value) ->
+            value?.let { encodeQueryParam(name, it) }
+        }
+    }
+
+    /** Adds one encoded query parameter. Call repeatedly when a key needs multiple values. */
+    fun withQueryParam(name: String, value: Any?) = apply {
+        value?.let { this.queryParams = this.queryParams + encodeQueryParam(name, it) }
+    }
+
+    private fun encodeQueryParam(name: String, value: Any): String {
+        val encodedName = URLEncoder.encode(name, Charsets.UTF_8.name())
+        val encodedValue = URLEncoder.encode(value.toString(), Charsets.UTF_8.name())
+        return "$encodedName=$encodedValue"
     }
 
     fun getUrl(): URL? {
-        val baseUrl = url ?: return throw IllegalArgumentException("Base URL must be provided")
-        return UrlBuilder(baseUrl).with(paths).asURL()
+        val baseUrl = url ?: throw IllegalArgumentException("Base URL must be provided")
+        val pathUrl = UrlBuilder(baseUrl).with(paths).asURL()
+        return if (queryParams.isEmpty()) pathUrl else URL("${pathUrl}?${queryParams.joinToString("&")}")
     }
 
-    fun asConnection(url: URL): HttpURLConnection? {
+    fun asConnection(url: URL): HttpURLConnection {
         val connection = if (url.toString().startsWith("https")) {
             val conn = url.openConnection() as HttpsURLConnection
             conn.also {
@@ -139,7 +162,7 @@ open class DefaultClient {
     ): HttpResponse<T> = withContext(Dispatchers.IO) {
         try {
             val connection = prepareConnection(method, doOutput = data != null)
-            if (method in listOf(HttpMethods.POST, HttpMethods.DELETE, HttpMethods.PUT, HttpMethods.PATCH)) {
+            if (data != null && method in listOf(HttpMethods.POST, HttpMethods.DELETE, HttpMethods.PUT, HttpMethods.PATCH)) {
                 val payload = preparePayload(data)
                 sendPayload(connection, payload)
             }

@@ -1,6 +1,5 @@
 package no.iktdev.networking.glide
 
-import android.util.Log
 import com.bumptech.glide.Registry
 import com.bumptech.glide.integration.okhttp3.OkHttpUrlLoader
 import com.bumptech.glide.load.model.GlideUrl
@@ -8,11 +7,15 @@ import no.iktdev.networking.Security
 import okhttp3.OkHttpClient
 import java.io.InputStream
 import javax.net.ssl.X509TrustManager
+import java.util.logging.Level
+import java.util.logging.Logger
 
 class GlideUnsecuredHttps {
     companion object {
+        private val logger = Logger.getLogger(GlideUnsecuredHttps::class.java.name)
+
         fun getUnsafeOkHttpClient(): OkHttpClient {
-            Log.d("UnsecureGlideHttps", "Using http client that permits unsafe https")
+            logger.fine("Creating OkHttp client that permits unsafe HTTPS")
             return try {
                 val sec = Security()
                 val socketFactory = sec.ssl()
@@ -23,14 +26,13 @@ class GlideUnsecuredHttps {
                 builder.hostnameVerifier(sec.name)
                 builder.build()
             } catch (e: Exception) {
-                Log.e(this::class.java.simpleName, "Unable to build unsecure OkHttp Client")
-                e.printStackTrace()
+                logger.log(Level.SEVERE, "Unable to build the HTTPS OkHttp client", e)
                 throw RuntimeException(e)
             }
         }
     }
     fun registerComponent(registry: Registry) {
-        Log.d("GlideModule", "Loading glide module from ${this.javaClass.name}")
+        logger.fine("Loading Glide module ${this.javaClass.name}")
         if (Security.makeCompletelyUnsecureCalls) {
             val client: OkHttpClient = getUnsafeOkHttpClient()
             registry.replace(

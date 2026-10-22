@@ -40,6 +40,61 @@ class DefaultClientHttpTest {
     }
 
     @Test
+    fun testGetWithQueryParameters() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"message":"hello"}""").setResponseCode(200))
+
+        val response = client
+            .withPaths("/v1/catalog/genre")
+            .withQueryParams(
+                "genreId" to 42L,
+                "offset" to 0L,
+                "limit" to 100,
+            )
+            .get<TestData>()
+
+        assertEquals(200, response.status)
+        assertEquals("/v1/catalog/genre?genreId=42&offset=0&limit=100", server.takeRequest().path)
+    }
+
+    @Test
+    fun testGetQueryParametersAreEncodedAndNullsOmitted() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"message":"hello"}""").setResponseCode(200))
+
+        client
+            .withPaths("/catalog/genre")
+            .withQueryParams(
+                "search" to "space & slash/",
+                "optional" to null,
+            )
+            .withQueryParam("tag", "one")
+            .withQueryParam("tag", "two words")
+            .get<TestData>()
+
+        assertEquals(
+            "/catalog/genre?search=space+%26+slash%2F&tag=one&tag=two+words",
+            server.takeRequest().path,
+        )
+    }
+
+    @Test
+    fun queryParametersDoNotLeakToTheNextPath() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"message":"first"}""").setResponseCode(200))
+        server.enqueue(MockResponse().setBody("""{"message":"second"}""").setResponseCode(200))
+
+        client
+            .withPaths("/catalog/genre")
+            .withQueryParams("genreId" to 42L)
+            .get<TestData>()
+
+        client
+            .withPaths("/catalog/all")
+            .get<TestData>()
+
+        assertEquals("/catalog/genre?genreId=42", server.takeRequest().path)
+        assertEquals("/catalog/all", server.takeRequest().path)
+    }
+
+    @Test
     fun testPost() = runBlocking {
         val responseBody = """{"message":"created"}"""
         server.enqueue(MockResponse().setBody(responseBody).setResponseCode(201))
