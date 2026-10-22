@@ -2,13 +2,17 @@ package no.iktdev.networking
 
 import junit.framework.Assert.assertEquals
 import junit.framework.Assert.assertNotNull
+import junit.framework.Assert.assertNull
 import kotlinx.coroutines.runBlocking
 import no.iktdev.networking.rest.DefaultClient
+import no.iktdev.networking.rest.DefaultClient.HttpConnectionConstructionException
+import no.iktdev.networking.rest.DefaultClient.ReadObjectException
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+import org.junit.Assert.assertThrows
 
 class DefaultClientHttpTest {
     data class TestData(val message: String)
@@ -37,6 +41,81 @@ class DefaultClientHttpTest {
         assertEquals(200, response.status)
         assertNotNull(response.result)
         assertEquals("hello", response.result?.message)
+    }
+
+    @Test
+    fun httpErrorPreservesStatusAndErrorBody() = runBlocking {
+        val errorBody = """{"error":"Authentication required"}"""
+        server.enqueue(MockResponse().setBody(errorBody).setResponseCode(401))
+
+        val response = client.get<TestData>()
+
+        assertEquals(401, response.status)
+        assertNull(response.result)
+        assertEquals(errorBody, response.error)
+    }
+
+    @Test
+    fun forbiddenResponsePreservesStatus() = runBlocking {
+        server.enqueue(MockResponse().setBody("Access denied").setResponseCode(403))
+
+        val response = client.get<TestData>()
+
+        assertEquals(403, response.status)
+        assertEquals("Access denied", response.error)
+    }
+
+    @Test
+    fun noContentIsAValidSuccessfulResponse() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(204))
+
+        val response = client.delete<TestData>()
+
+        assertEquals(204, response.status)
+        assertNull(response.result)
+        assertNull(response.error)
+    }
+
+    @Test
+    fun malformedSuccessfulBodyThrowsDecodeExceptionWithHttpContext() {
+        server.enqueue(MockResponse().setBody("not-json").setResponseCode(200))
+
+        val exception = assertThrows(ReadObjectException::class.java) {
+            runBlocking { client.get<TestData>() }
+        }
+
+        assertEquals(200, exception.responseStatus)
+        assertEquals("not-json", exception.responseBody)
+        assertNotNull(exception.cause)
+    }
+
+    @Test
+    fun missingBaseUrlThrowsConnectionConstructionException() {
+        val exception = assertThrows(HttpConnectionConstructionException::class.java) {
+            runBlocking { DefaultClient().get<TestData>() }
+        }
+
+        assertNotNull(exception.request)
+    }
+
+    @Test
+    fun bearerTokenIsSentOverHttp() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"message":"ok"}""").setResponseCode(200))
+        client.withBearerToken("test-token").get<TestData>()
+
+        assertEquals("Bearer test-token", server.takeRequest().getHeader("Authorization"))
+    }
+
+    @Test
+    fun requestBodyUsesUtf8() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"message":"ok"}""").setResponseCode(200))
+
+        client.post<TestData>(TestData("Blåbær 😅"))
+
+        assertEquals(
+            """{"message":"Blåbær 😅"}""",
+            server.takeRequest().body.readUtf8(),
+        )
     }
 
     @Test
