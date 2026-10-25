@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -21,6 +22,7 @@ import no.iktdev.networking.download.core.DownloadReportData
 import no.iktdev.networking.download.core.RemoteFileInformation
 import no.iktdev.networking.download.core.RemoteFileInformationData
 import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -58,12 +60,7 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
                 it.mkdir()
             }
         }
-        return File(myCacheDir, "$fileName.$suffix").also {
-            if (it.exists()) {
-                it.delete()
-            }
-            it.createNewFile()
-        }
+        return File(myCacheDir, "$fileName.$suffix")
     }
 
 
@@ -84,48 +81,68 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
     }
 
     fun getProgress(downloadedLength: Long, remoteLength: Long): Int {
-        return (((downloadedLength.toDouble()) / remoteLength) * 100).roundToInt()
+        if (remoteLength <= 0L) return 0
+        return (((downloadedLength.toDouble()) / remoteLength) * 100).roundToInt().coerceIn(0, 100)
     }
 
 
+    @Synchronized
     fun start(url: String, fileName: String): Job {
+        check(downloadJob?.isActive != true) { "A download is already active on this client" }
+        downloadedBytes = 0L
+        isPaused = false
+        isFailed = false
+        isCanceled = false
+        cachedProgress = 0
+        remoteFileInformationData = null
         val job = scope.launch {
             var report: DownloadReportData? = null
             val downloadReport = getCachedFile("$fileName-report", "json").also {
                 report = getDownloadReport(it)?.also { drd ->
                     downloadedBytes = drd.bytesReceived.toLong()
                 }
-                if (!it.exists()) {
-                    it.createNewFile()
-                }
             }
 
-            remoteFileInformationData = RemoteFileInformation().getRemoteFileInformationData(url).also {
+            remoteFileInformationData = runCatching {
+                RemoteFileInformation().getRemoteFileInformationData(url)
+            }.getOrNull().also {
                 eventListener?.onDownloadInformationObtained(it)
             }
 
             val client = Http.getHttpByUrl(url)
 
-            if (report != null && downloadedBytes > 0 && report?.remoteLength == remoteFileInformationData?.fileSize) {
-                Log.i(this::class.java.simpleName, "Found abandoned download, resuming")
-                resumeAbandonedDownload(client, downloadReport)
-            }
+            var canResume = false
             var downloadStream: InputStream? = null
             var outputStream: FileOutputStream? = null
             var tempFile: File? = null
             try {
                 tempFile = getCachedFile(fileName, "temp").also { tmpFile ->
-                    if (tmpFile.exists() && (report == null || downloadedBytes == 0L)) {
+                    canResume = report != null && downloadedBytes > 0L &&
+                        report?.remoteLength == remoteFileInformationData?.fileSize &&
+                        tmpFile.isFile && tmpFile.length() == downloadedBytes
+                    if (!canResume) {
+                        downloadedBytes = 0L
                         tmpFile.delete()
+                        downloadReport.delete()
                     }
-                    if (!tmpFile.exists()) {
-                        tmpFile.createNewFile()
-                    }
+                    tmpFile.parentFile?.mkdirs()
+                    if (!tmpFile.exists()) tmpFile.createNewFile()
+                }
+                if (canResume) {
+                    Log.i(this::class.java.simpleName, "Found abandoned download, resuming")
+                    resumeAbandonedDownload(client, downloadReport)
                 }
                 Log.i(this::class.simpleName, "Downloading into: ${tempFile.absolutePath}")
                 client.http.connect()
+                if (canResume && client.http.responseCode != 206) {
+                    // Some servers ignore Range. Restart from byte zero instead of appending
+                    // a full response to the partial file.
+                    downloadedBytes = 0L
+                    FileOutputStream(tempFile, false).close()
+                    canResume = false
+                }
                 downloadStream = client.http.inputStream
-                outputStream = FileOutputStream(tempFile, true)
+                outputStream = FileOutputStream(tempFile, canResume)
 
                 val buffer = ByteArray(bufferSize)
                 var bytesRead: Int = 0
@@ -134,11 +151,13 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
                     eventListener?.onDownloadStarted(fileName, tempFile)
                 }
 
-                while (isActive && downloadStream.read(buffer).also { bytesRead = it } != -1) {
+                while (isActive) {
                     if (isPaused) {
                         delay(500)
                         continue
                     }
+                    bytesRead = downloadStream.read(buffer)
+                    if (bytesRead == -1) break
                     outputStream.write(buffer, 0, bytesRead)
                     downloadedBytes += bytesRead
 
@@ -154,37 +173,48 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
                     }
                     yield()
                 }
+                if (!isActive) throw CancellationException()
+                val expectedBytes = remoteFileInformationData?.fileSize ?: 0L
+                if (expectedBytes > 0L && downloadedBytes < expectedBytes) {
+                    throw EOFException("Download ended at $downloadedBytes of $expectedBytes bytes")
+                }
 
             } catch (e: Exception) {
                 if (e is CancellationException) {
                     isCanceled = true
-                    withContext(Dispatchers.Main) {
-                        eventListener?.onDownloadCanceled(fileName, tempFile)
-                    }
                 } else {
                     e.printStackTrace()
                     isFailed = true
-                    withContext(Dispatchers.Main) {
-                        eventListener?.onDownloadFailed(fileName, tempFile)
-                    }
                 }
             } finally {
-                downloadStream?.close()
-                outputStream?.close()
-                client.http.disconnect()
-                if (!isFailed && !isCanceled && tempFile != null) {
-                    withContext(Dispatchers.Main) {
-                        eventListener?.onDownloadCompleted(fileName, tempFile)
+                withContext(NonCancellable) {
+                    downloadStream?.close()
+                    outputStream?.close()
+                    client.http.disconnect()
+                    if (!isFailed && !isCanceled && tempFile != null) {
+                        withContext(Dispatchers.Main) {
+                            eventListener?.onDownloadCompleted(fileName, tempFile)
+                        }
+                    } else if (isCanceled) {
+                        withContext(Dispatchers.Main) {
+                            eventListener?.onDownloadCanceled(fileName, tempFile)
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            eventListener?.onDownloadFailed(fileName, tempFile)
+                        }
                     }
-                } else if (isCanceled) {
-                    eventListener?.onDownloadCanceled(fileName, tempFile)
-                } else {
-                    eventListener?.onDownloadFailed(fileName, tempFile)
-                    tempFile?.also { if (it.exists()) it.delete() }
-                    downloadReport.also { if (it.exists()) it.delete() }
+                    if (isFailed) {
+                        tempFile?.also { if (it.exists()) it.delete() }
+                        downloadReport.also { if (it.exists()) it.delete() }
+                    }
                 }
             }
-            writeReport(downloadReport, tempFile, remoteFileInformationData?.fileSize ?: -1)
+            if (isCanceled && tempFile != null) {
+                writeReport(downloadReport, tempFile, remoteFileInformationData?.fileSize ?: -1)
+            } else if (!isFailed) {
+                downloadReport.delete()
+            }
 
         }.also { downloadJob = it }
         return job
@@ -229,6 +259,7 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
                 it.http.connect()
             }
             var previousDownloadedProgress = 0
+            var currentDownloadedBytes = 0L
             val contentSize = RemoteFileInformation().getSizeFromHeader(client.http)
             var inputStream: InputStream? = null
             var outputStream: ByteArrayOutputStream? = null
@@ -241,10 +272,10 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
 
                 while (isActive && inputStream.read(buffer).also { bytesRead = it } != -1) {
                     outputStream.write(buffer, 0, bytesRead)
-                    downloadedBytes += bytesRead
+                    currentDownloadedBytes += bytesRead
 
                     contentSize?.let { size ->
-                        val downloadedProgress = (downloadedBytes.toDouble() / size).roundToInt()
+                        val downloadedProgress = ((currentDownloadedBytes.toDouble() / size) * 100).roundToInt().coerceIn(0, 100)
                         if (downloadedProgress > previousDownloadedProgress) {
                             withContext(Dispatchers.Main) {
                                 progress(downloadedProgress)
