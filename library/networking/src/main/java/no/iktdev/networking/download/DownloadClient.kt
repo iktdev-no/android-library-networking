@@ -38,11 +38,13 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
     private var isPaused = false
     private var downloadedBytes = 0L
     val bufferSize = 8 * 1024
+    private val byteProgressIntervalMs = 250L
     private var isFailed = false
     private var isCanceled = false
 
     private var remoteFileInformationData: RemoteFileInformationData? = null
     private var cachedProgress: Int = 0
+    private var lastByteProgressAtMs: Long = 0L
 
     var cacheDirectory: File? = null
 
@@ -94,6 +96,7 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
         isFailed = false
         isCanceled = false
         cachedProgress = 0
+        lastByteProgressAtMs = 0L
         remoteFileInformationData = null
         val job = scope.launch {
             var report: DownloadReportData? = null
@@ -163,7 +166,8 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
 
                     // Log.d(this::class.simpleName, "$downloadedBytes/${remoteFileInformationData?.fileSize ?: 0} (Downloaded/Remote) ")
 
-                    val progress = getProgress(downloadedBytes, remoteFileInformationData?.fileSize ?: 0)
+                    val totalBytes = remoteFileInformationData?.fileSize?.coerceAtLeast(0L) ?: 0L
+                    val progress = getProgress(downloadedBytes, totalBytes)
                     if (progress > cachedProgress) {
                        // Log.d(this::class.simpleName, "Downloaded $progress% of $fileName")
                         cachedProgress = progress
@@ -171,7 +175,23 @@ class DownloadClient(val context: Context, val scope: CoroutineScope, val eventL
                             eventListener?.onDownloadProgress(fileName, progress)
                         }
                     }
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    //noinspection ConvertTwoComparisonsToRangeCheck
+                    val reachedEnd = totalBytes > 0L && downloadedBytes >= totalBytes
+                    if (now - lastByteProgressAtMs >= byteProgressIntervalMs || reachedEnd) {
+                        lastByteProgressAtMs = now
+                        withContext(Dispatchers.Main) {
+                            eventListener?.onDownloadByteProgress(fileName, downloadedBytes, totalBytes)
+                        }
+                    }
                     yield()
+                }
+                withContext(Dispatchers.Main) {
+                    eventListener?.onDownloadByteProgress(
+                        fileName,
+                        downloadedBytes,
+                        remoteFileInformationData?.fileSize?.coerceAtLeast(0L) ?: 0L,
+                    )
                 }
                 if (!isActive) throw CancellationException()
                 val expectedBytes = remoteFileInformationData?.fileSize ?: 0L

@@ -8,6 +8,7 @@ interface DownloadEvents {
     fun onDownloadStarted(fileName: String, file: File) {}
     fun onDownloadInformationObtained(remoteFileInformation: RemoteFileInformationData?) {}
     fun onDownloadProgress(fileName: String, progress: Int) {}
+    fun onDownloadByteProgress(fileName: String, downloadedBytes: Long, totalBytes: Long) {}
     fun onDownloadCompleted(fileName: String, file: File) {}
     fun onDownloadFailed(fileName: String, file: File?) {}
     fun onDownloadCanceled(fileName: String, file: File?) {}
