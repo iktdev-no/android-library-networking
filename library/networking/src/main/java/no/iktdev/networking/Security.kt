@@ -2,6 +2,7 @@ package no.iktdev.networking
 
 import android.annotation.SuppressLint
 import java.security.KeyManagementException
+import java.security.KeyStore
 import java.security.NoSuchAlgorithmException
 import java.security.SecureRandom
 import java.security.cert.CertificateException
@@ -47,15 +48,27 @@ class Security {
     var name = HostnameVerifier { _, _ -> true }
 
     @Throws(NoSuchAlgorithmException::class, KeyManagementException::class)
-    fun ssl(): SSLSocketFactory {
+    fun noSslTrust(): SSLSocketFactory {
         val ssl = SSLContext.getInstance("TLS")
         ssl.init(null, truster, SecureRandom())
         return ssl.socketFactory
     }
 
+    @Throws(NoSuchAlgorithmException::class, KeyManagementException::class)
+    fun ssl(trustStore: KeyStore): SSLSocketFactory {
+        val tmf = TrustManagerFactory.getInstance(
+            TrustManagerFactory.getDefaultAlgorithm()
+        )
+        tmf.init(trustStore)
+
+        val ssl = SSLContext.getInstance("TLS")
+        ssl.init(null, tmf.trustManagers, SecureRandom())
+        return ssl.socketFactory
+    }
+
     fun disableHttpsSecurity(http: HttpsURLConnection) {
         http.hostnameVerifier = name
-        http.sslSocketFactory = ssl()
+        http.sslSocketFactory = noSslTrust()
     }
 
     fun setAuthorizationBearer(http: HttpsURLConnection) {

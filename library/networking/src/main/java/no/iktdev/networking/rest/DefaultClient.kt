@@ -12,6 +12,7 @@ import java.net.HttpURLConnection
 import java.net.MalformedURLException
 import java.net.URL
 import java.net.URLEncoder
+import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
@@ -25,162 +26,81 @@ import javax.net.ssl.X509TrustManager
  * Coroutine-based HTTP client. HTTP error statuses are returned in [HttpResponse.status]; failures
  * inside the client are thrown as [NetworkingException] subclasses.
  */
-open class DefaultClient {
-    var url: String? = null
-        private set
+open class DefaultClient(): BasicClient() {
+
+
     /** Sets the base URL used to create requests. */
-    fun usingUrl(url: String) = apply {
-        this.url = url
+    override fun usingUrl(url: String) = apply {
+        super.usingUrl(url)
     }
 
-    var exceptionHandler: ((Exception) -> Unit)? = null
-        private set
-    /** Registers a callback invoked before a [NetworkingException] is rethrown. */
-    fun setExceptionHandler(e : (Exception) -> Unit) = apply {
-        this.exceptionHandler = e
-    }
-
-    private var timeout: Int = 5000
     /** Sets connect and read timeouts, in milliseconds. */
-    fun withTimeout(timeout: Int) = apply {
-        this.timeout = timeout
+    override fun withTimeout(timeout: Int) = apply {
+        super.withTimeout(timeout)
     }
 
-    private var bearerToken: String? = null
     /** Adds an `Authorization: Bearer …` header to requests. */
-    fun withBearerToken(token: String) = apply {
+    override fun withBearerToken(token: String) = apply {
         this.bearerToken = token
     }
 
-    private var disableTrust: Boolean = false
-    /** Disables TLS certificate and hostname checks. Use only for controlled development setups. */
-    fun withoutTrust() = apply {
-        disableTrust = true
+    override fun withAnyTrust(): BasicClient {
+        return super.withAnyTrust()
     }
 
-    /** Restores TLS certificate and hostname verification. */
-    fun withTrust() = apply {
-        disableTrust = false
+    override fun withDefaultTrust(): BasicClient {
+        return super.withDefaultTrust()
     }
 
+    override fun withPinnedPublicKey(sha256Key: String): BasicClient {
+        return super.withPinnedPublicKey(sha256Key)
+    }
 
-    private var contentType: String = "application/json"
+    private var contentType: String? = "application/json"
     /** Sets the `Content-Type` request header. */
     fun withContentType(contentType: String) = apply {
         this.contentType = contentType
     }
 
-    private var paths: List<String> = listOf()
     /** Sets the path for the next request and clears query parameters from the previous path. */
-    fun withPaths(vararg part: String) = apply {
-        this.paths = part.toList()
-        this.queryParams = emptyList()
+    override fun withPaths(vararg part: String) = apply {
+        super.withPaths(*part)
     }
 
-    private var queryParams: List<String> = emptyList()
 
     /** Sets encoded query parameters for the current path. Call after [withPaths]; null values are omitted. */
-    fun withQueryParams(vararg params: Pair<String, Any?>) = apply {
-        this.queryParams = params.mapNotNull { (name, value) ->
-            value?.let { encodeQueryParam(name, it) }
-        }
+    override fun withQueryParams(vararg params: Pair<String, Any?>) = apply {
+        super.withQueryParams(*params)
     }
 
     /** Adds one encoded query parameter. Call repeatedly when a key needs multiple values. */
     fun withQueryParam(name: String, value: Any?) = apply {
-        value?.let { this.queryParams = this.queryParams + encodeQueryParam(name, it) }
+        value?.let { this.queryParams += encodeQueryParam(name, it) }
     }
 
-    private fun encodeQueryParam(name: String, value: Any): String {
-        val encodedName = URLEncoder.encode(name, Charsets.UTF_8.name())
-        val encodedValue = URLEncoder.encode(value.toString(), Charsets.UTF_8.name())
-        return "$encodedName=$encodedValue"
-    }
 
-    /**
-     * Builds the current request URL.
-     *
-     * @throws IllegalArgumentException if no base URL has been configured.
-     * @throws MalformedURLException if the configured URL cannot be parsed.
-     */
-    @Throws(IllegalArgumentException::class, MalformedURLException::class)
-    fun getUrl(): URL? {
-        val baseUrl = url ?: throw IllegalArgumentException("Base URL must be provided")
-        val pathUrl = UrlBuilder(baseUrl).with(paths).asURL()
-        return if (queryParams.isEmpty()) pathUrl else URL("${pathUrl}?${queryParams.joinToString("&")}")
-    }
-
-    /**
-     * Creates a configured connection for [url].
-     *
-     * @throws IOException if the URL handler cannot open a connection.
-     */
     @Throws(IOException::class)
-    fun asConnection(url: URL): HttpURLConnection {
-        val connection = if (url.toString().startsWith("https")) {
-            val conn = url.openConnection() as HttpsURLConnection
-            conn.also {
-                if (disableTrust) {
-                    it.disableTrust()
-                }
+    fun openStream(headers: Map<String, String> = emptyMap()): HttpURLConnection {
+
+        val connection = asConnection()
+        contentType = null
+
+        try {
+            connection.requestMethod = HttpMethods.GET.name
+            headers.forEach { (name, value) ->
+                connection.setRequestProperty(name, value)
             }
-        } else {
-            url.openConnection() as HttpURLConnection
-        }
-        connection.also {
-            it.setRequestProperty("Content-Type", contentType)
-            if (!bearerToken.isNullOrEmpty()) {
-                it.setRequestProperty("Authorization", "Bearer $bearerToken")
-            }
-        }
-        return connection.apply {
-            connectTimeout = timeout
-            readTimeout = timeout
+
+            connection.connect()
+            return connection
+        } catch (e: Exception) {
+            connection.disconnect()
+            throw e
         }
     }
 
-    /** Base type for failures produced by the networking client itself. */
-    open class NetworkingException(
-        override val message: String,
-        val request: HttpRequest? = null,
-        cause: Throwable? = null
-    ) : Exception(message, cause)
 
-    /** Thrown when a request URL or its connection cannot be constructed or configured. */
-    class HttpConnectionConstructionException(
-        message: String,
-        request: HttpRequest? = null,
-        cause: Throwable? = null
-    ) : NetworkingException(message, request, cause)
 
-    /** Thrown when connecting to a server or reading a successful response fails. */
-    class HttpConnectionException(
-        message: String,
-        request: HttpRequest? = null,
-        cause: Throwable? = null
-    ) : NetworkingException(message, request, cause)
-
-    /** Thrown when a request payload cannot be serialized. */
-    class RequestSerializationException(
-        message: String,
-        cause: Throwable? = null
-    ) : NetworkingException(message, cause = cause)
-
-    /** Thrown when the serialized request payload cannot be written to the connection. */
-    class RequestWriteException(
-        message: String,
-        request: HttpRequest,
-        cause: Throwable? = null
-    ) : NetworkingException(message, request, cause)
-
-    /** Thrown when a successful HTTP response body cannot be decoded as the requested type. */
-    class ReadObjectException(
-        val responseStatus: Int,
-        val responseBody: String,
-        request: HttpRequest,
-        message: String,
-        cause: Throwable? = null
-    ) : NetworkingException(message, request, cause)
 
     /**
      * Prepares and connects an HTTP request.
@@ -190,22 +110,12 @@ open class DefaultClient {
      */
     @Throws(HttpConnectionConstructionException::class, HttpConnectionException::class)
     fun prepareConnection(method: HttpMethods, doOutput: Boolean = false): HttpURLConnection {
-        val requestUrl = try {
-            getUrl() ?: throw IllegalArgumentException("Failed to create request URL")
-        } catch (e: Exception) {
-            throw HttpConnectionConstructionException(
-                message = "Failed to create request URL: ${e.message}",
-                request = HttpRequest(this@DefaultClient.url ?: "Not set", "Not set"),
-                cause = e
-            )
-        }
-        val request = HttpRequest(this@DefaultClient.url ?: "Not set", requestUrl.toString())
         val connection = try {
-            asConnection(requestUrl)
+            asConnection()
         } catch (e: Exception) {
             throw HttpConnectionConstructionException(
                 message = "Failed to create HTTP connection: ${e.message}",
-                request = request,
+                request = this@DefaultClient.url,
                 cause = e
             )
         }
@@ -214,16 +124,20 @@ open class DefaultClient {
             connection.requestMethod = method.name
             connection.doOutput = doOutput
             connection.tryConnect()
+            return connection
         } catch (e: NetworkingException) {
+            // This method did not successfully hand the connection to its caller.
+            connection.disconnect()
             throw e
         } catch (e: Exception) {
+            // This method did not successfully hand the connection to its caller.
+            connection.disconnect()
             throw HttpConnectionConstructionException(
                 message = "Failed to configure HTTP connection: ${e.message}",
-                request = request,
+                request = this@DefaultClient.url,
                 cause = e
             )
         }
-        return connection
     }
 
     /** Serializes a request payload as JSON (or returns supported scalar values as text). */
@@ -266,8 +180,8 @@ open class DefaultClient {
         method: HttpMethods,
         data: Any? = null
     ): HttpResponse<T> = withContext(Dispatchers.IO) {
+        val connection = prepareConnection(method, doOutput = data != null)
         try {
-            val connection = prepareConnection(method, doOutput = data != null)
             if (data != null && method in listOf(HttpMethods.POST, HttpMethods.DELETE, HttpMethods.PUT, HttpMethods.PATCH)) {
                 val payload = try {
                     preparePayload(data)
@@ -279,7 +193,7 @@ open class DefaultClient {
                 } catch (e: Exception) {
                     throw RequestWriteException(
                         message = "Failed to write request body: ${e.message}",
-                        request = HttpRequest(url ?: "Not set", connection.url.toString()),
+                        request = this@DefaultClient.url,
                         cause = e
                     )
                 }
@@ -295,19 +209,15 @@ open class DefaultClient {
             val requestUrl = runCatching { getUrl()?.toString() }.getOrNull() ?: "Not set"
             throw HttpConnectionException(
                 message = "Unexpected networking client failure: ${e.message}",
-                request = HttpRequest(url ?: "Not set", requestUrl),
+                request = requestUrl,
                 cause = e
             )
+        } finally {
+            connection.disconnect()
         }
     }
 
-    enum class HttpMethods {
-        GET,
-        POST,
-        PUT,
-        PATCH,
-        DELETE
-    }
+
 
     /**
      * Sends a GET request. Non-2xx HTTP statuses are returned in [HttpResponse.status].
@@ -387,10 +297,7 @@ open class DefaultClient {
         } catch (e: Exception) {
             throw HttpConnectionException(
                 message = "Failed to connect: ${e.message}",
-                request = HttpRequest(
-                    address = this@DefaultClient.url ?: "Not set",
-                    url = this.url.toString()
-                ),
+                request = this@DefaultClient.url,
                 cause = e
             )
         }
@@ -409,18 +316,11 @@ open class DefaultClient {
         } catch (e: Exception) {
             throw HttpConnectionException(
                 message = "Failed to receive HTTP response: ${e.message}",
-                request = HttpRequest(
-                    address = this@DefaultClient.url ?: "Not set",
-                    url = url?.toString() ?: "Not set"
-                ),
+                request = this@DefaultClient.url,
                 cause = e
             )
         }
 
-        val request = HttpRequest(
-            address = this@DefaultClient.url ?: "Not set",
-            url = url?.toString() ?: "Not set"
-        )
         val successful = status in 200..299
         val content = try {
             val responseStream = if (successful) inputStream else errorStream
@@ -431,7 +331,7 @@ open class DefaultClient {
             } else {
                 throw HttpConnectionException(
                     message = "Failed to read HTTP response: ${e.message}",
-                    request = request,
+                    request = this@DefaultClient.url,
                     cause = e
                 )
             }
@@ -439,12 +339,12 @@ open class DefaultClient {
 
         // Preserve real HTTP error codes and bodies so API layers can handle them.
         if (!successful) {
-            return HttpResponse(status, null, content.ifBlank { null }, request)
+            return HttpResponse(status, null, content.ifBlank { null }, this@DefaultClient.url)
         }
 
         // Empty successful responses (for example 204 No Content) have no model to decode.
         if (content.isBlank()) {
-            return HttpResponse(status, null, null, request)
+            return HttpResponse(status, null, null, this@DefaultClient.url)
         }
 
         return try {
@@ -460,7 +360,7 @@ open class DefaultClient {
                     Gson().fromJson<T>(content, type)
                 }
             }
-            HttpResponse(status, result, null, request)
+            HttpResponse(status, result, null, this@DefaultClient.url)
         } catch (e: Exception) {
             val className = try {
                 T::class.java.simpleName ?: T::class.simpleName ?: "[Unable to get name]"
@@ -470,7 +370,7 @@ open class DefaultClient {
             throw ReadObjectException(
                 responseStatus = status,
                 responseBody = content,
-                request = request,
+                request = this@DefaultClient.url,
                 message = "Failed to decode HTTP $status response as $className: ${e.message}",
                 cause = e
             )
@@ -485,42 +385,8 @@ open class DefaultClient {
         val status: Int,
         val result: T?,
         val error: String? = null,
-        val request: HttpRequest
-    )
-    data class HttpRequest(
-        val address: String,
-        val url: String
+        val request: String?
     )
 
-
-
-    fun HttpsURLConnection.disableTrust() = apply {
-        this.hostnameVerifier = HostnameVerifier { _, _ -> true }
-
-        val truster = arrayOf<TrustManager>(
-            @SuppressLint("CustomX509TrustManager")
-            object : X509TrustManager {
-                @SuppressLint("TrustAllX509TrustManager")
-                @Throws(CertificateException::class)
-                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {
-                    // Do trust
-                }
-
-                @SuppressLint("TrustAllX509TrustManager")
-                @Throws(CertificateException::class)
-                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
-                    // Do trust
-                }
-
-                override fun getAcceptedIssuers(): Array<X509Certificate> {
-                    return arrayOf()
-                }
-            }
-        )
-
-        this.sslSocketFactory = SSLContext.getInstance("TLS").apply {
-            init(null, truster, SecureRandom())
-        }.socketFactory
-
-    }
 }
+

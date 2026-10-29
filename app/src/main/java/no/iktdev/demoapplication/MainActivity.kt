@@ -9,7 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import no.iktdev.demoapplication.databinding.ActivityMainBinding
-import no.iktdev.networking.mdns.ndsDiscovery
+import no.iktdev.networking.mdns.NdsDiscovery
 import no.iktdev.networking.mdns.ndsDiscoveryListener
 
 class MainActivity : AppCompatActivity() {
@@ -21,7 +21,7 @@ class MainActivity : AppCompatActivity() {
         val ioScope = CoroutineScope(Job() + Dispatchers.IO)
 
         ioScope.launch {
-            val discovery = ndsDiscovery(this@MainActivity, "_streamit._tcp", object: ndsDiscoveryListener {
+            val discovery = NdsDiscovery(this@MainActivity, "_streamit._tcp", object: ndsDiscoveryListener {
                 override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
                     TODO("Not yet implemented")
                 }

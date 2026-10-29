@@ -2,34 +2,51 @@ package no.iktdev.networking.download.core
 
 import android.os.Build
 import android.util.Log
-import no.iktdev.networking.client.Http
+import no.iktdev.networking.rest.DefaultClient
 import java.net.HttpURLConnection
 
 class RemoteFileInformation {
 
-    fun getRemoteFileInformationData(url: String): RemoteFileInformationData? {
-        val client = Http.getHttpByUrl(url)
-        val connection = client.http
-        connection.requestMethod = "HEAD"
-
-        connection.connect()
-        if (connection.responseCode !in 200..299) {
-            connection.disconnect()
+    fun getRemoteFileInformationData(
+        client: DefaultClient
+    ): RemoteFileInformationData? {
+        val connection = try {
+            client.prepareConnection(DefaultClient.HttpMethods.HEAD)
+        } catch (e: Exception) {
             return null
         }
 
-        val contentSize = getSizeFromConnection(connection).ifZeroOrNegative { getSizeFromHeader(connection) ?: 0 }
-        val contentFileName = getFileName(connection)
-        val extension = contentFileName?.withoutExtension()
+        return try {
+            val status = connection.responseCode
 
-        connection.disconnect()
+            if (status !in 200..299) {
+                return null
+            }
 
-        return RemoteFileInformationData(
-            fileName = contentFileName,
-            fileExtension = extension,
-            fileSize = contentSize,
-            uri = connection.url.toString()
-        )
+            val contentSize = getSizeFromConnection(connection)
+                .takeIf { it > 0L }
+                ?: getSizeFromHeader(connection)
+                ?: 0L
+
+            val supportsRanges = connection
+                .getHeaderField("Accept-Ranges")
+                ?.equals("bytes", ignoreCase = true) == true
+
+            val contentFileName = getFileName(connection)
+            val extension = contentFileName?.withoutExtension()
+
+            RemoteFileInformationData(
+                fileName = contentFileName,
+                fileExtension = extension,
+                fileSize = contentSize,
+                uri = connection.url.toString(),
+                supportsRanges = supportsRanges
+            )
+        } catch (e: Exception) {
+            null
+        } finally {
+            connection.disconnect()
+        }
     }
 
 
@@ -64,12 +81,11 @@ class RemoteFileInformation {
 
     private fun getSizeFromConnection(connection: HttpURLConnection): Long {
         return if (!connection.contentLength.isZeroOrNegative()) {
-            return connection.contentLength.toLong()
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            connection.contentLength.toLong()
+        } else
             if (!connection.contentLengthLong.isZeroOrNegative()) {
-                return connection.contentLengthLong
+                connection.contentLengthLong
             } else 0L
-        } else 0L
 
     }
 

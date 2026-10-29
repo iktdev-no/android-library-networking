@@ -1,321 +1,388 @@
-@file:OptIn(ExperimentalStdlibApi::class)
-
 package no.iktdev.networking.download
 
-import android.content.Context
-import android.util.Log
-import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.yield
-import no.iktdev.networking.client.Http
-import no.iktdev.networking.download.core.DownloadReportData
 import no.iktdev.networking.download.core.RemoteFileInformation
-import no.iktdev.networking.download.core.RemoteFileInformationData
-import java.io.ByteArrayOutputStream
-import java.io.EOFException
+import no.iktdev.networking.models.DownloadListener
+import no.iktdev.networking.models.DownloadState
+import no.iktdev.networking.rest.DefaultClient
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
-import java.net.URL
-import kotlin.math.roundToInt
+import java.io.IOException
+import java.net.HttpURLConnection
 
-/**
- * @param cacheDir where it can be internal cache or external
- */
-class DownloadClient(val context: Context, val scope: CoroutineScope, val eventListener: DownloadEvents? = null) {
-    var downloadClientCacheDirName = "iktdev_download_cache"
+class DownloadClient(
+    private val listener: DownloadListener
+) : DefaultClient() {
+
+    private val lock = Any()
+    private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    var state: DownloadState = DownloadState.NotStarted
+        private set
+
+    @Volatile
+    private var activeConnection: HttpURLConnection? = null
+
     private var downloadJob: Job? = null
-    private var isPaused = false
-    private var downloadedBytes = 0L
-    val bufferSize = 8 * 1024
-    private val byteProgressIntervalMs = 250L
-    private var isFailed = false
-    private var isCanceled = false
+    private var pauseSignal: CompletableDeferred<Unit>? = null
+    private var cancelRequested = false
 
-    private var remoteFileInformationData: RemoteFileInformationData? = null
-    private var cachedProgress: Int = 0
-    private var lastByteProgressAtMs: Long = 0L
+    private val bufferSize = 64 * 1024
 
-    var cacheDirectory: File? = null
+    // Keep fluent calls typed as DownloadClient, including the security configuration.
+    override fun usingUrl(url: String): DownloadClient =
+        apply { super.usingUrl(url) }
 
-    init {
-        require(scope.coroutineContext[CoroutineDispatcher.Key] == Dispatchers.IO) {
-            "DownloadManager requires a CoroutineScope with Dispatchers.IO"
+    override fun withTimeout(timeout: Int): DownloadClient =
+        apply { super.withTimeout(timeout) }
+
+    override fun withBearerToken(token: String): DownloadClient =
+        apply { super.withBearerToken(token) }
+
+    override fun withPinnedPublicKey(sha256Key: String): DownloadClient =
+        apply { super.withPinnedPublicKey(sha256Key) }
+
+    override fun withDefaultTrust(): DownloadClient =
+        apply { super.withDefaultTrust() }
+
+    override fun withAnyTrust(): DownloadClient =
+        apply { super.withAnyTrust() }
+
+    override fun withPaths(vararg part: String): DownloadClient =
+        apply { super.withPaths(*part) }
+
+    override fun withQueryParams(
+        vararg params: Pair<String, Any?>
+    ): DownloadClient =
+        apply { super.withQueryParams(*params) }
+
+    /**
+     * Starts a download to targetFile.
+     *
+     * An existing target is replaced only after the download succeeds.
+     * An interrupted download is retained in targetFile.part for resuming.
+     */
+    suspend fun start(url: String, targetFile: File): Job {
+        require(url.isNotBlank()) { "URL cannot be blank" }
+
+        val job = synchronized(lock) {
+            check(downloadJob?.isActive != true) {
+                "A download is already active on this client"
+            }
+
+            cancelRequested = false
+            pauseSignal = null
+            setStateLocked(DownloadState.Running)
+
+            downloadScope.launch(start = CoroutineStart.LAZY) {
+                val partFile = targetFile.partFile()
+
+                try {
+                    withContext(Dispatchers.IO) {
+                        targetFile.parentFile?.let {
+                            if (!it.exists() && !it.mkdirs()) {
+                                throw IOException("Could not create directory: $it")
+                            }
+                        }
+
+                        listener.onStarted(targetFile)
+
+                        // Metadata is best-effort; the actual GET determines the
+                        // response status and the authoritative range information.
+                        val remoteInfo = try {
+                            currentCoroutineContext().ensureActive()
+                            RemoteFileInformation()
+                                .getRemoteFileInformationData(this@DownloadClient.usingUrl(url))
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            null
+                        }
+
+                        listener.onRemoteFileInfo(remoteInfo)
+
+                        downloadToPartFile(url, partFile, remoteInfo?.fileSize)
+
+                        currentCoroutineContext().ensureActive()
+                        checkNotCanceled()
+
+                        // Rename only after the part file has completed successfully.
+                        if (targetFile.exists() && !targetFile.delete()) {
+                            throw IOException("Could not replace target file: $targetFile")
+                        }
+
+                        if (!partFile.renameTo(targetFile)) {
+                            throw IOException(
+                                "Could not rename ${partFile.absolutePath} to ${targetFile.absolutePath}"
+                            )
+                        }
+                    }
+
+                    setState(DownloadState.Completed)
+                    listener.onCompleted(targetFile)
+                } catch (e: CancellationException) {
+                    setState(DownloadState.Canceled)
+                    listener.onCanceled(partFile)
+                    throw e
+                } catch (e: Exception) {
+                    setState(DownloadState.Failed)
+                    listener.onFailed(targetFile, e)
+                    throw e
+                } finally {
+                    activeConnection?.disconnect()
+                    activeConnection = null
+
+                    synchronized(lock) {
+                        pauseSignal?.complete(Unit)
+                        pauseSignal = null
+                        downloadJob = null
+                    }
+                }
+            }.also {
+                downloadJob = it
+            }
         }
-    }
 
-    private fun getCachedFile(fileName: String, suffix: String): File {
-        val cacheDir = if (cacheDirectory == null) { context.cacheDir } else cacheDirectory
-
-        val myCacheDir = File(cacheDir, downloadClientCacheDirName).also {
-            if (!it.exists()) {
-                it.mkdir()
-            }
-        }
-        return File(myCacheDir, "$fileName.$suffix")
-    }
-
-
-    private fun resumeAbandonedDownload(client: Http, report: File) {
-        client.http.setRequestProperty("Range", "bytes=$downloadedBytes-")
-    }
-
-    private fun getDownloadReport(reportFile: File): DownloadReportData? {
-        return if (reportFile.exists()) {
-            try {
-                Gson().fromJson(reportFile.readText(), DownloadReportData::class.java)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                reportFile.delete()
-                null
-            }
-        } else null
-    }
-
-    fun getProgress(downloadedLength: Long, remoteLength: Long): Int {
-        if (remoteLength <= 0L) return 0
-        return (((downloadedLength.toDouble()) / remoteLength) * 100).roundToInt().coerceIn(0, 100)
-    }
-
-
-    @Synchronized
-    fun start(url: String, fileName: String): Job {
-        check(downloadJob?.isActive != true) { "A download is already active on this client" }
-        downloadedBytes = 0L
-        isPaused = false
-        isFailed = false
-        isCanceled = false
-        cachedProgress = 0
-        lastByteProgressAtMs = 0L
-        remoteFileInformationData = null
-        val job = scope.launch {
-            var report: DownloadReportData? = null
-            val downloadReport = getCachedFile("$fileName-report", "json").also {
-                report = getDownloadReport(it)?.also { drd ->
-                    downloadedBytes = drd.bytesReceived.toLong()
-                }
-            }
-
-            remoteFileInformationData = runCatching {
-                RemoteFileInformation().getRemoteFileInformationData(url)
-            }.getOrNull().also {
-                eventListener?.onDownloadInformationObtained(it)
-            }
-
-            val client = Http.getHttpByUrl(url)
-
-            var canResume = false
-            var downloadStream: InputStream? = null
-            var outputStream: FileOutputStream? = null
-            var tempFile: File? = null
-            try {
-                tempFile = getCachedFile(fileName, "temp").also { tmpFile ->
-                    canResume = report != null && downloadedBytes > 0L &&
-                        report?.remoteLength == remoteFileInformationData?.fileSize &&
-                        tmpFile.isFile && tmpFile.length() == downloadedBytes
-                    if (!canResume) {
-                        downloadedBytes = 0L
-                        tmpFile.delete()
-                        downloadReport.delete()
-                    }
-                    tmpFile.parentFile?.mkdirs()
-                    if (!tmpFile.exists()) tmpFile.createNewFile()
-                }
-                if (canResume) {
-                    Log.i(this::class.java.simpleName, "Found abandoned download, resuming")
-                    resumeAbandonedDownload(client, downloadReport)
-                }
-                Log.i(this::class.simpleName, "Downloading into: ${tempFile.absolutePath}")
-                client.http.connect()
-                if (canResume && client.http.responseCode != 206) {
-                    // Some servers ignore Range. Restart from byte zero instead of appending
-                    // a full response to the partial file.
-                    downloadedBytes = 0L
-                    FileOutputStream(tempFile, false).close()
-                    canResume = false
-                }
-                downloadStream = client.http.inputStream
-                outputStream = FileOutputStream(tempFile, canResume)
-
-                val buffer = ByteArray(bufferSize)
-                var bytesRead: Int = 0
-
-                withContext(Dispatchers.Main) {
-                    eventListener?.onDownloadStarted(fileName, tempFile)
-                }
-
-                while (isActive) {
-                    if (isPaused) {
-                        delay(500)
-                        continue
-                    }
-                    bytesRead = downloadStream.read(buffer)
-                    if (bytesRead == -1) break
-                    outputStream.write(buffer, 0, bytesRead)
-                    downloadedBytes += bytesRead
-
-                    // Log.d(this::class.simpleName, "$downloadedBytes/${remoteFileInformationData?.fileSize ?: 0} (Downloaded/Remote) ")
-
-                    val totalBytes = remoteFileInformationData?.fileSize?.coerceAtLeast(0L) ?: 0L
-                    val progress = getProgress(downloadedBytes, totalBytes)
-                    if (progress > cachedProgress) {
-                       // Log.d(this::class.simpleName, "Downloaded $progress% of $fileName")
-                        cachedProgress = progress
-                        withContext(Dispatchers.Main) {
-                            eventListener?.onDownloadProgress(fileName, progress)
-                        }
-                    }
-                    val now = android.os.SystemClock.elapsedRealtime()
-                    //noinspection ConvertTwoComparisonsToRangeCheck
-                    val reachedEnd = totalBytes > 0L && downloadedBytes >= totalBytes
-                    if (now - lastByteProgressAtMs >= byteProgressIntervalMs || reachedEnd) {
-                        lastByteProgressAtMs = now
-                        withContext(Dispatchers.Main) {
-                            eventListener?.onDownloadByteProgress(fileName, downloadedBytes, totalBytes)
-                        }
-                    }
-                    yield()
-                }
-                withContext(Dispatchers.Main) {
-                    eventListener?.onDownloadByteProgress(
-                        fileName,
-                        downloadedBytes,
-                        remoteFileInformationData?.fileSize?.coerceAtLeast(0L) ?: 0L,
-                    )
-                }
-                if (!isActive) throw CancellationException()
-                val expectedBytes = remoteFileInformationData?.fileSize ?: 0L
-                if (expectedBytes > 0L && downloadedBytes < expectedBytes) {
-                    throw EOFException("Download ended at $downloadedBytes of $expectedBytes bytes")
-                }
-
-            } catch (e: Exception) {
-                if (e is CancellationException) {
-                    isCanceled = true
-                } else {
-                    e.printStackTrace()
-                    isFailed = true
-                }
-            } finally {
-                withContext(NonCancellable) {
-                    downloadStream?.close()
-                    outputStream?.close()
-                    client.http.disconnect()
-                    if (!isFailed && !isCanceled && tempFile != null) {
-                        withContext(Dispatchers.Main) {
-                            eventListener?.onDownloadCompleted(fileName, tempFile)
-                        }
-                    } else if (isCanceled) {
-                        withContext(Dispatchers.Main) {
-                            eventListener?.onDownloadCanceled(fileName, tempFile)
-                        }
-                    } else {
-                        withContext(Dispatchers.Main) {
-                            eventListener?.onDownloadFailed(fileName, tempFile)
-                        }
-                    }
-                    if (isFailed) {
-                        tempFile?.also { if (it.exists()) it.delete() }
-                        downloadReport.also { if (it.exists()) it.delete() }
-                    }
-                }
-            }
-            if (isCanceled && tempFile != null) {
-                writeReport(downloadReport, tempFile, remoteFileInformationData?.fileSize ?: -1)
-            } else if (!isFailed) {
-                downloadReport.delete()
-            }
-
-        }.also { downloadJob = it }
+        job.start()
         return job
     }
 
-    private fun writeReport(reportFile: File, outFile: File?, remoteLength: Long) {
-        val report = DownloadReportData(
-            outFile = outFile?.absolutePath,
-            bytesReceived = this.downloadedBytes,
-            remoteLength = remoteLength
-        )
-        reportFile.writeText(Gson().toJson(report))
-    }
-
     fun pause() {
-        isPaused = true
+        synchronized(lock) {
+            if (state != DownloadState.Running || downloadJob?.isActive != true) {
+                return
+            }
+
+            pauseSignal = CompletableDeferred()
+            setStateLocked(DownloadState.Paused)
+        }
     }
 
     fun resume() {
-        isPaused = false
+        synchronized(lock) {
+            if (state != DownloadState.Paused) return
+
+            pauseSignal?.complete(Unit)
+            pauseSignal = null
+            setStateLocked(DownloadState.Running)
+        }
     }
 
     fun cancel() {
-        downloadJob?.cancel()
-        downloadJob = null
-    }
-
-    suspend fun directDownload(url: URL, progress: (Int) -> Unit = {}): ByteArray? {
-        return directDownload(url.toString(), progress)
-    }
-
-
-    suspend fun directDownload(url: String, progress: (Int) -> Unit = {}): ByteArray? {
-        Log.i(this::class.simpleName, "directDownload url: $url")
-        if (url.isNullOrBlank()) {
-            throw RuntimeException("Provided url is null or blank!")
-        } else if (!url.contains("http")) {
-            throw RuntimeException("Provided url does not contain http or https: $url")
+        val job = synchronized(lock) {
+            cancelRequested = true
+            pauseSignal?.complete(Unit)
+            pauseSignal = null
+            downloadJob
         }
-        return scope.async {
-            val client = Http.getHttpByUrl(url).also {
-                it.http.connect()
+
+        // Disconnecting helps unblock a pending network read.
+        activeConnection?.disconnect()
+        job?.cancel(CancellationException("Download canceled"))
+    }
+
+    /**
+     * Cancels this client's active download and its internal scope.
+     * Call when the DownloadClient will no longer be used.
+     */
+    fun close() {
+        cancel()
+        downloadScope.cancel()
+    }
+
+    private suspend fun downloadToPartFile(
+        url: String,
+        partFile: File,
+        expectedTotalBytes: Long?
+    ) {
+        partFile.parentFile?.let {
+            if (!it.exists() && !it.mkdirs()) {
+                throw IOException("Could not create directory: $it")
             }
-            var previousDownloadedProgress = 0
-            var currentDownloadedBytes = 0L
-            val contentSize = RemoteFileInformation().getSizeFromHeader(client.http)
-            var inputStream: InputStream? = null
-            var outputStream: ByteArrayOutputStream? = null
+        }
 
-            try {
-                inputStream = client.http.inputStream
-                outputStream = ByteArrayOutputStream()
-                val buffer = ByteArray(bufferSize)
-                var bytesRead: Int = 0
+        val existingBytes = if (partFile.isFile) partFile.length() else 0L
+        val headers = if (existingBytes > 0L) {
+            mapOf("Range" to "bytes=$existingBytes-")
+        } else {
+            emptyMap()
+        }
 
-                while (isActive && inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    outputStream.write(buffer, 0, bytesRead)
-                    currentDownloadedBytes += bytesRead
+        // This calls DefaultClient.openStream(), which calls BasicClient.asConnection().
+        // TLS trust, public-key pinning, bearer auth and timeouts are therefore inherited.
+        val connection = usingUrl(url).openStream(headers)
+        activeConnection = connection
 
-                    contentSize?.let { size ->
-                        val downloadedProgress = ((currentDownloadedBytes.toDouble() / size) * 100).roundToInt().coerceIn(0, 100)
-                        if (downloadedProgress > previousDownloadedProgress) {
-                            withContext(Dispatchers.Main) {
-                                progress(downloadedProgress)
-                            }
-                            previousDownloadedProgress = downloadedProgress
-                        }
+        try {
+            val statusCode = connection.responseCode
+            val append: Boolean
+            val responseStart: Long
+            val responseTotal: Long?
+
+            when (statusCode) {
+                HttpURLConnection.HTTP_OK -> {
+                    // Server ignored Range (or this is a fresh download).
+                    // Restart rather than append a full response to a partial file.
+                    append = false
+                    responseStart = 0L
+                    responseTotal = connection.contentLengthLong
+                        .takeIf { it >= 0L }
+                }
+
+                HttpURLConnection.HTTP_PARTIAL -> {
+                    if (existingBytes <= 0L) {
+                        throw IOException("Server returned 206 without a Range request")
                     }
 
+                    val contentRange = connection.getHeaderField("Content-Range")
+                        ?: throw IOException("206 response did not include Content-Range")
 
+                    val parsed = parseContentRange(contentRange)
+                        ?: throw IOException("Invalid Content-Range: $contentRange")
+
+                    responseStart = parsed.first
+                    responseTotal = parsed.second
+
+                    if (responseStart != existingBytes) {
+                        throw IOException(
+                            "Range mismatch: requested byte $existingBytes, " +
+                                    "server started at $responseStart"
+                        )
+                    }
+
+                    append = true
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                client.http.disconnect()
-                inputStream?.close()
-                outputStream?.close()
+
+                else -> {
+                    val errorBody = runCatching {
+                        connection.errorStream?.bufferedReader()?.use { it.readText() }
+                    }.getOrNull()
+
+                    throw IOException(
+                        "Download failed with HTTP $statusCode" +
+                                (errorBody?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "")
+                    )
+                }
             }
-            outputStream?.toByteArray()
-        }.await()
+
+            val totalBytes = responseTotal
+                ?: expectedTotalBytes?.takeIf { it >= 0L }
+
+            if (append && totalBytes != null && existingBytes > totalBytes) {
+                throw IOException(
+                    "Partial file is larger than remote file ($existingBytes > $totalBytes)"
+                )
+            }
+
+            var downloadedBytes = if (append) existingBytes else 0L
+            val buffer = ByteArray(bufferSize)
+
+            connection.inputStream.use { input ->
+                FileOutputStream(partFile, append).use { output ->
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        checkNotCanceled()
+                        awaitIfPaused()
+
+                        val bytesRead = input.read(buffer)
+                        if (bytesRead < 0) break
+                        if (bytesRead == 0) continue
+
+                        output.write(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+
+                        val percent = totalBytes
+                            ?.takeIf { it > 0L }
+                            ?.let {
+                                ((downloadedBytes.toDouble() / it) * 100.0)
+                                    .toInt()
+                                    .coerceIn(0, 100)
+                            }
+
+                        listener.onProgress(
+                            downloadedBytes,
+                            totalBytes ?: -1L,
+                            percent
+                        )
+                    }
+
+                    output.fd.sync()
+                }
+            }
+
+            if (totalBytes != null && downloadedBytes != totalBytes) {
+                throw IOException(
+                    "Incomplete download: received $downloadedBytes of $totalBytes bytes"
+                )
+            }
+        } finally {
+            connection.disconnect()
+            if (activeConnection === connection) {
+                activeConnection = null
+            }
+        }
     }
 
+    private suspend fun awaitIfPaused() {
+        while (true) {
+            val signal = synchronized(lock) {
+                if (state == DownloadState.Paused) pauseSignal else null
+            } ?: return
 
+            signal.await()
+            currentCoroutineContext().ensureActive()
+            checkNotCanceled()
+        }
+    }
+
+    private fun checkNotCanceled() {
+        if (cancelRequested) {
+            throw CancellationException("Download canceled")
+        }
+    }
+
+    private fun setState(newState: DownloadState) {
+        synchronized(lock) {
+            setStateLocked(newState)
+        }
+    }
+
+    private fun setStateLocked(newState: DownloadState) {
+        state = newState
+        listener.onStateChanged(newState)
+    }
+
+    /**
+     * Parses "bytes START-END/TOTAL".
+     * A total of "*" is allowed but means the total is unknown.
+     */
+    private fun parseContentRange(value: String): Pair<Long, Long?>? {
+        val match = Regex("""bytes\s+(\d+)-(\d+)/(\d+|\*)""")
+            .matchEntire(value.trim())
+            ?: return null
+
+        val start = match.groupValues[1].toLongOrNull() ?: return null
+        val end = match.groupValues[2].toLongOrNull() ?: return null
+        val total = match.groupValues[3].toLongOrNull()
+
+        if (end < start) return null
+        if (total != null && end >= total) return null
+
+        return start to total
+    }
+
+    private fun File.partFile(): File =
+        File(parentFile, "$name.part")
 }

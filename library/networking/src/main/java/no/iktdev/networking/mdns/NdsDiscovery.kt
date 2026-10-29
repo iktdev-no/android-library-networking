@@ -5,8 +5,7 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Log
 
-class ndsDiscovery(context: Context, val serviceName: String, var listener: ndsDiscoveryListener) {
-    val TAG = this::class.java.simpleName
+class NdsDiscovery(context: Context, val serviceName: String, var listener: ndsDiscoveryListener) {
     private var nsdManager: NsdManager? = null
 
     init {
