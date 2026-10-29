@@ -44,19 +44,15 @@ open class DefaultClient(): BasicClient() {
         this.bearerToken = token
     }
 
-    override fun withAnyTrust(): BasicClient {
-        return super.withAnyTrust()
-    }
+    override fun withAnyTrust(): DefaultClient =
+        apply { super.withAnyTrust() }
 
-    override fun withDefaultTrust(): BasicClient {
-        return super.withDefaultTrust()
-    }
+    override fun withDefaultTrust(): DefaultClient =
+        apply { super.withDefaultTrust() }
 
-    override fun withPinnedPublicKey(sha256Key: String): BasicClient {
-        return super.withPinnedPublicKey(sha256Key)
-    }
+    override fun withPinnedPublicKey(sha256Key: String): DefaultClient =
+        apply { super.withPinnedPublicKey(sha256Key) }
 
-    private var contentType: String? = "application/json"
     /** Sets the `Content-Type` request header. */
     fun withContentType(contentType: String) = apply {
         this.contentType = contentType
@@ -115,7 +111,7 @@ open class DefaultClient(): BasicClient() {
         } catch (e: Exception) {
             throw HttpConnectionConstructionException(
                 message = "Failed to create HTTP connection: ${e.message}",
-                request = this@DefaultClient.url,
+                request = this@DefaultClient.url ?: "Not set",
                 cause = e
             )
         }
@@ -134,7 +130,7 @@ open class DefaultClient(): BasicClient() {
             connection.disconnect()
             throw HttpConnectionConstructionException(
                 message = "Failed to configure HTTP connection: ${e.message}",
-                request = this@DefaultClient.url,
+                request = this@DefaultClient.url ?: "Not set",
                 cause = e
             )
         }
@@ -389,4 +385,3 @@ open class DefaultClient(): BasicClient() {
     )
 
 }
-

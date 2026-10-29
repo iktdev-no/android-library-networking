@@ -31,7 +31,7 @@ class DefaultClientHttpsTest {
 
         client = DefaultClient()
             .usingUrl(server.url("/").toString())
-            .withoutTrust() // Accept all certificates
+            .withAnyTrust() // Accept all certificates
     }
 
     @After

@@ -5,8 +5,9 @@ import junit.framework.Assert.assertNotNull
 import junit.framework.Assert.assertNull
 import kotlinx.coroutines.runBlocking
 import no.iktdev.networking.rest.DefaultClient
-import no.iktdev.networking.rest.DefaultClient.HttpConnectionConstructionException
-import no.iktdev.networking.rest.DefaultClient.ReadObjectException
+import no.iktdev.networking.rest.HttpConnectionConstructionException
+import no.iktdev.networking.rest.ReadObjectException
+
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After

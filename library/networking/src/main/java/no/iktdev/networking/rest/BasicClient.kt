@@ -12,6 +12,7 @@ import javax.net.ssl.HttpsURLConnection
 
 abstract class BasicClient {
     protected var trust = Trust.DefaultTrust
+    protected var contentType: String? = "application/json"
 
     var url: String? = null
         protected set
@@ -135,11 +136,11 @@ abstract class BasicClient {
                 }
             }
 
-            return connection.apply {
-                contentType?.let {
-                    setRequestProperty("Content-Type", it)
-                }
+            contentType?.let {
+                connection.setRequestProperty("Content-Type", it)
+            }
 
+            return connection.apply {
                 if (!bearerToken.isNullOrEmpty()) {
                     setRequestProperty("Authorization", "Bearer $bearerToken")
                 }
