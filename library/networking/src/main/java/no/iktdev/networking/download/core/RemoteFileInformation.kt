@@ -2,6 +2,7 @@ package no.iktdev.networking.download.core
 
 import android.os.Build
 import android.util.Log
+import no.iktdev.networking.rest.BasicClient
 import no.iktdev.networking.rest.DefaultClient
 import java.net.HttpURLConnection
 
@@ -11,7 +12,7 @@ class RemoteFileInformation {
         client: DefaultClient
     ): RemoteFileInformationData? {
         val connection = try {
-            client.prepareConnection(DefaultClient.HttpMethods.HEAD)
+            client.prepareConnection(BasicClient.HttpMethods.HEAD)
         } catch (e: Exception) {
             return null
         }
