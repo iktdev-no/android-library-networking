@@ -1,74 +1,59 @@
+
 package no.iktdev.networking
 
-import no.iktdev.networking.client.Http
+import java.net.URI
 import java.net.URL
 
 class UrlBuilder(val url: String) {
-    var _url: String = ""
-        private set
-    var protocol: Protocol = Protocol.HTTP
-        private set
-    var domain: String = ""
-        private set
-    var path: List<String> = listOf()
-        private set
 
-    init {
-        obtainProtocol(url)
-        obtainDomain(url)
-        obtainPaths(url)
+    private val uri = URI(url)
+
+    val protocol: Protocol = when (uri.scheme?.lowercase()) {
+        "https" -> Protocol.HTTPS
+        "http" -> Protocol.HTTP
+        else -> throw IllegalArgumentException(
+            "Unsupported URL protocol: ${uri.scheme}"
+        )
     }
 
-    private fun obtainProtocol(url: String): Boolean {
-        return if (url.contains("//")) {
-            when {
-                Http.isHttps(url) -> {
-                    this.protocol = Protocol.HTTPS
-                    true
-                }
-                Http.isHttp(url) -> {
-                    this.protocol = Protocol.HTTP
-                    true
-                }
-                else -> false
-            }
-        } else false
-    }
-    private fun obtainDomain(url: String) {
-        var murl = if (Http.isHttp(url) && url.contains("//")) url.substring(url.indexOf("//")+2) else url
-        murl = if (murl.contains("/")) murl.substring(0, murl.indexOf("/")) else murl
-        this.domain = murl.trim()
-    }
-    private fun obtainPaths(url: String) {
-        val murl = if (Http.isHttp(url) && url.contains("//")) url.substring(url.indexOf("//")+2) else url
-        val urlPath = if (murl.contains("/")) murl.substring(murl.indexOf("/")) else return
-        val splittedPaths: java.util.ArrayList<String> = arrayListOf()
-        splittedPaths.addAll(urlPath.split("/").filter { it.isNotEmpty() }.toTypedArray())
-        this.path += splittedPaths
-    }
+    val domain: String = uri.rawAuthority
+        ?.substringAfterLast('@')
+        ?: throw IllegalArgumentException("URL must contain a domain: $url")
 
-    @Suppress("unused")
+    var path: List<String> = uri.rawPath
+        .orEmpty()
+        .split('/')
+        .filter(String::isNotEmpty)
+        private set
+
+    fun isHttps(url: String): Boolean =
+        URI(url).scheme.equals("https", ignoreCase = true)
+
+    fun isHttp(url: String): Boolean =
+        URI(url).scheme.equals("http", ignoreCase = true)
+
     fun to(path: String) = apply {
-        this.path += path.split("/").filter { it.isNotEmpty() }
+        this.path += splitPath(path)
     }
 
     fun with(paths: List<String>) = apply {
-        this.path += paths.flatMap { it.split("/") }.filter { it.isNotEmpty() }
+        this.path += paths.flatMap(::splitPath)
     }
 
     fun with(vararg parts: String) = apply {
-        this.path += parts.flatMap { it.split("/") }.filter { it.isNotEmpty() }
+        this.path += parts.flatMap(::splitPath)
     }
 
-    fun toUrl(): String {
-        _url = (if (protocol == Protocol.HTTPS) "https" else "http") + "://" + domain
-        _url += "/"
-        _url += path.joinToString("/")
-        return _url.trimEnd('/')
-    }
+    fun toUrl(): String = buildString {
+        append(protocol.name.lowercase())
+        append("://")
+        append(domain)
+        append('/')
+        append(path.joinToString("/"))
+    }.trimEnd('/')
 
+    fun asURL(): URL = URI(toUrl()).toURL()
 
-    fun asURL(): URL {
-        return URL(toUrl())
-    }
+    private fun splitPath(path: String): List<String> =
+        path.split('/').filter(String::isNotEmpty)
 }
